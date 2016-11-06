@@ -21,10 +21,6 @@ Expect this to be 2-3x more work than the hardest project this semester.  The be
 
 ### WebGL
 
-#### WebGL-Next
-
-Propose and prototype a next-generation WebGL API.  See [Thoughts about a WebGL-Next](http://floooh.github.io/2016/08/13/webgl-next.html).
-
 #### Extend the [WebGL 2 Samples Pack](https://github.com/WebGLSamples/WebGL2Samples)
 
 See https://github.com/WebGLSamples/WebGL2Samples/issues/91
@@ -37,6 +33,10 @@ On mobile, how does the power usage of JavaScript/WebGL compare to C++/OpenGL ES
 
 Create a tutorial using WebGL that teaches either basic _GPU architecture_ (parallelism, branches, multithreading, SIMD, etc.) or _Tile-Based Architectures_ like those used in mobile GPUs.  For inspiration, see [Making WebGL Dance](http://acko.net/files/fullfrontal/fullfrontal/webglmath/online.html) by Steven Wittens.
 
+#### WebGL-Next
+
+Propose and prototype a next-generation WebGL API.  See [Thoughts about a WebGL-Next](http://floooh.github.io/2016/08/13/webgl-next.html).
+
 ### glTF
 
 Disclosure: I am one of the glTF spec editors.
@@ -45,11 +45,17 @@ Disclosure: I am one of the glTF spec editors.
 
 #### Various Projects
 
-glTF, the GL Transmission Format (glTF), is a new runtime asset delivery format for WebGL.  It needs an ecosystem of tools, documentation, and extensions.  Consider implementing a minimal WebGL renderer for glTF assets or doing a detailed size/performance analysis of glTF compared to other 3D model formats.  See [these ideas](https://github.com/KhronosGroup/glTF/issues/456).
+glTF, the GL Transmission Format (glTF), is a new runtime asset delivery format for WebGL.  It needs an ecosystem of tools, documentation, and extensions.  See [these ideas](https://github.com/KhronosGroup/glTF/issues/456).  Ideas:
+
+* Contribute to [assimp](http://www.assimp.org/), [notes](https://github.com/KhronosGroup/glTF/issues/726#issuecomment-249858688).
+* Contribute to the [Blender glTF exporter](https://github.com/Kupoman/blendergltf).
+* Write a detailed size/performance analysis of glTF compared to other 3D model formats
 
 #### GPU-accelerated prebaked AO
 
-GPU-accelerate the [prebaking AO stage](http://cesiumjs.org/2016/08/08/ambient-occlusion/) in the glTF Pipeline.  Use a uniform grid; see [A Memory Efficient Uniform Grid Build Process for GPUs](http://jcgt.org/published/0005/03/04/).
+GPU-accelerate the [prebaking AO stage](http://cesiumjs.org/2016/08/08/ambient-occlusion/) in the glTF Pipeline.  See the [AO Roadmap](https://github.com/AnalyticalGraphicsInc/gltf-pipeline/issues/125).
+
+Use a uniform grid; see [A Memory Efficient Uniform Grid Build Process for GPUs](http://jcgt.org/published/0005/03/04/).
 
 ### Vulkan
 
@@ -83,11 +89,11 @@ Write a _Vulkan for OpenGL developers_ tutorial series.
 
 GPU accelerate filters in [PDAL](http://www.pdal.io/) or [PCL](http://pointclouds.org/).
 
-#### Autonomous Cars
+##### Autonomous Cars
 
 GPU accelerate parts of [autonomous cars](http://www.nvidia.com/object/drive-automotive-technology.html).
 
-### Alternative Rendering Pipelines
+#### Alternative Rendering Pipelines
 
 Use CUDA or compute shaders to build a custom or hybrid rendering pipeline, e.g., instead of creating a rasterization pipeline for triangles, create a graphics pipeline optimizations for [points](http://graphics.ucsd.edu/~matthias/Papers/Surfels.pdf), [voxels](https://research.nvidia.com/publication/voxelpipe-programmable-pipeline-3d-voxelization), or [vectors](http://w3.impa.br/~diego/projects/GanEtAl14/).
 
