@@ -205,13 +205,19 @@ After class, push your presentation to your GitHub repo.
 
 Same format as Milestone 2.
 
-### **Date TBA** - Final Presentation
+### **Thursday 12/15** - Final Presentation
 
-10-minute final presentation and demo.
+5-minute final presentation.
 
-By midnight the day before:
+This should be a polished presentation with a 1-2 slide **overview** of the technical at a high-level of abstraction, followed by a **demo/video of the results** in different representative scenarios, followed by a careful **performance analysis**, and finally **shortcomings** of the approach.
+
+It is OK to present this as a few slides with a demo/video for the results section, or to prepare a video for the entire presentation and then talk to the video as your presentation.
+
+Please practice for timing; do not exceed five minutes.
+
+By 6pm:
 * Push the following to GitHub
-   * Final presentation slides
+   * Final presentation slides/video
    * Final code - should be clean, documented, and tested
 * A detailed README.md including:
    * Name of your project
@@ -220,7 +226,6 @@ By midnight the day before:
    * Link to demo if possible.  WebGL demos should include your names and a link back to your github repo
    * Overview of technique and links to references
    * Link to video
-      * Two to four minutes in length to show off your work.  Your video should complement your paper and clarify anything that is difficult to describe in just words and images.  Your video should both make us excited about your work and help us if we were to implement it
    * Detailed performance analysis
    * Install and build instructions
 
