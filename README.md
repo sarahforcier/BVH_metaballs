@@ -98,6 +98,7 @@ Build something with gpu.js:
 
 https://cesiumjs.org/
 
+
 3D Mapping WebGL Engine
 
 Disclosure: I started this project. :smirk:
@@ -135,8 +136,13 @@ Directly from the BabylonJS team:
 
 ![](images/lightprojection.jpg)
 
-* For our GUI system, we are also looking for adding spritesheet animations to our image object: https://github.com/BabylonJS/Babylon.js/issues/2927
 * Other interesting topic: add a new Depth of Field post process: https://github.com/BabylonJS/Babylon.js/issues/2506  .We already support DoF but as part of an entire pipeline. The goal here is to extract it, make it better (with kernel blur) and make it simple and performant to use
+
+* More postprocesses:
+ * Better bloom
+ * Cartoon
+ * Paper
+ * You name it :)
 
 ## Vulkan
 
