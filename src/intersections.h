@@ -148,7 +148,7 @@ __host__ __device__ float rayMarchTest(Metaball ball, Ray r,
 {
 
 	Ray rt;
-	rt.origin = r.origin + ball.translation;
+	rt.origin = r.origin - ball.translation;
 	rt.direction = r.direction;
 
 	float radius = ball.radius;
@@ -180,7 +180,7 @@ __host__ __device__ float rayMarchTest(Metaball ball, Ray r,
 
 	glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
 
-	intersectionPoint = objspaceIntersection - ball.translation;
+	intersectionPoint = objspaceIntersection + ball.translation;
 	normal = glm::normalize(objspaceIntersection);
 	if (!outside) {
 		normal = -normal;

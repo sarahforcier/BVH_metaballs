@@ -18,7 +18,7 @@
 #define ERRORCHECK 1
 
 #define NUM_BALLS 2
-#define THRESHOLD 0.5
+#define THRESHOLD 0.2
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -157,6 +157,28 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 	}
 }
 
+__device__ float calculateDensity(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+	float density = 0.f;
+	for (int j = 0; j < count; ++j) {
+		float dist = glm::distance(x, ballHits[offset + j].translation);
+		if (dist < ballHits[offset + j].radius) {
+			float val = 1.0f - dist * dist / (ballHits[offset + j].radius * ballHits[offset + j].radius);
+			density += val * val;
+		}
+	}
+	density -= THRESHOLD;
+	return density;
+}
+
+__device__ glm::vec3 calculateNormals(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+	glm::vec3 normal(0.f);
+	for (int j = 0; j < count; ++j) {
+		glm::vec3 diff = x - ballHits[offset + j].translation;
+		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
+	}
+	return glm::normalize(normal);
+}
+
 // TODO:
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
@@ -219,28 +241,56 @@ __global__ void computeIntersections(
 
 		float final_t = ballDist[offset];
 
+		glm::vec3 debug_vector = ballHits[offset].translation;
+
 		// find first positive influence
 
 		int first;
 		float density = 0.f;
+		float s;
+		glm::vec3 x;
 		for (first = 0; first < count; ++first) {
 			// calculate influence
-			float s = glm::dot(pathSegment.ray.direction, ballHits[offset + first].translation - pathSegment.ray.origin);
-			glm::vec3 x = pathSegment.ray.origin + s * pathSegment.ray.direction;
+			s = glm::dot(pathSegment.ray.direction, ballHits[offset + first].translation - pathSegment.ray.origin);
+			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
 
-			density = 0.f;
-			for (int j = 0; j < count; ++j) {
-				float dist = glm::distance(x, ballHits[offset + j].translation);
-				if (dist < ballHits[offset + j].radius) {
-					density += 1.0f - dist * dist/ ballHits[offset + j].radius;
-				}
+			density = calculateDensity(count, ballHits, offset, x);
+			if (density > 0) {
+				break;
 			}
-
-			if (density > THRESHOLD) break;
 		}
 
 		//do the secant method
-		//do dichotomic method
+		float t0 = 0;
+		float t1 = s;
+		
+		float f1 = density;
+		float f0 = calculateDensity(count, ballHits, offset, pathSegment.ray.origin);
+		float t2 = 0;
+		float f2 = 0;
+		int steps = 0;
+		glm::vec3 x2;
+		while (first != count && (t1 - t0 > 0.0001) && steps < 10) {
+			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
+			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
+			f2 = calculateDensity(count, ballHits, offset, x2);
+			if (f2 > 0) {
+				t1 = t2;
+				f1 = f2;
+			}
+			else {
+				t0 = t2;
+				f0 = f2;
+			}
+			steps++;
+		}
+
+		normal = calculateNormals(count, ballHits, offset, x2);
+		final_t = (first != count) ? t2 : -1.f;
+
+
+
+		// TODO do dichotomic method
 
 
 		// naive parse through global geoms
@@ -279,7 +329,8 @@ __global__ void computeIntersections(
 			//The ray hits something
 			//intersections[path_index].t = t_min;
 			intersections[path_index].t = final_t;
-			intersections[path_index].debug = fabsf(density);
+
+			intersections[path_index].debug = normal;
 			//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 			intersections[path_index].materialId = count;
 			intersections[path_index].surfaceNormal = normal;
@@ -357,7 +408,7 @@ __global__ void shadeMetaballs(
 	{
 		ShadeableIntersection intersection = shadeableIntersections[idx];
 		if (intersection.t > 0.0f) { // if the intersection exists...
-			pathSegments[idx].color = glm::vec3(intersection.debug);
+			pathSegments[idx].color = intersection.debug;
 		}
 		else {
 			pathSegments[idx].color = glm::vec3(0.1f);

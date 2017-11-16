@@ -100,7 +100,7 @@ int Scene::loadMetaballs() {
 	Metaball ball2;
 	ball2.radius = 1.f;
 	ball2.materialid = 1;
-	ball2.translation = glm::vec3(1.f, 0.f, 0.f);
+	ball2.translation = glm::vec3(1.2f, 0.f, 0.f);
 	metaballs.push_back(ball2);
 
 	return 1;
