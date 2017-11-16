@@ -28,6 +28,12 @@ struct Geom {
     glm::mat4 invTranspose;
 };
 
+struct Metaball {
+	int materialid;
+	float radius;
+	glm::vec3 translation;
+};
+
 struct Material {
     glm::vec3 color;
     struct {
@@ -73,4 +79,5 @@ struct ShadeableIntersection {
   float t;
   glm::vec3 surfaceNormal;
   int materialId;
+  float debug;
 };

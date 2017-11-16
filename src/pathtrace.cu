@@ -4,6 +4,7 @@
 #include <thrust/execution_policy.h>
 #include <thrust/random.h>
 #include <thrust/remove.h>
+#include <thrust/sort.h>
 
 #include "sceneStructs.h"
 #include "scene.h"
@@ -15,6 +16,9 @@
 #include "interactions.h"
 
 #define ERRORCHECK 1
+
+#define NUM_BALLS 2
+#define THRESHOLD 0.5
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -73,8 +77,11 @@ static Geom * dev_geoms = NULL;
 static Material * dev_materials = NULL;
 static PathSegment * dev_paths = NULL;
 static ShadeableIntersection * dev_intersections = NULL;
+
 // TODO: static variables for device memory, any extra info you need, etc
-// ...
+static Metaball * dev_metaballs = NULL;
+static Metaball * dev_ballHits = NULL;
+static float * dev_ballDist = NULL;
 
 void pathtraceInit(Scene *scene) {
     hst_scene = scene;
@@ -96,9 +103,15 @@ void pathtraceInit(Scene *scene) {
   	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
+	cudaMalloc(&dev_metaballs, NUM_BALLS * sizeof(Metaball));
+	cudaMemcpy(dev_metaballs, scene->metaballs.data(), NUM_BALLS * sizeof(Metaball), cudaMemcpyHostToDevice);
+
+	cudaMalloc(&dev_ballHits, NUM_BALLS * pixelcount * sizeof(Metaball));
+	cudaMalloc(&dev_ballDist, NUM_BALLS * pixelcount * sizeof(float));
 
     checkCUDAError("pathtraceInit");
 }
+
 
 void pathtraceFree() {
     cudaFree(dev_image);  // no-op if dev_image is null
@@ -107,7 +120,9 @@ void pathtraceFree() {
   	cudaFree(dev_materials);
   	cudaFree(dev_intersections);
     // TODO: clean up any extra device memory you created
-
+	cudaFree(dev_metaballs);
+	cudaFree(dev_ballHits);
+	cudaFree(dev_ballDist);
     checkCUDAError("pathtraceFree");
 }
 
@@ -153,6 +168,9 @@ __global__ void computeIntersections(
 	, Geom * geoms
 	, int geoms_size
 	, ShadeableIntersection * intersections
+	, Metaball * metaballs
+	, Metaball * ballHits
+	, float * ballDist
 	)
 {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -171,9 +189,63 @@ __global__ void computeIntersections(
 		glm::vec3 tmp_intersect;
 		glm::vec3 tmp_normal;
 
+		//TODO 
+		//find metaball intersection
+
+		//loop over all metaballs and add to intersections along ray
+
+		int count = 0;
+		int offset = path_index * NUM_BALLS;
+		for (int i = 0; i < NUM_BALLS; i++) {
+			Metaball & ball = metaballs[i];
+			t = rayMarchTest(ball, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+			if (t > 0.0f)
+			{
+				ballHits[offset + count] = ball;
+				ballDist[offset + count] = t;
+				count++;
+	
+				if (t_min > t) {
+					t_min = t;
+					hit_geom_index = count; // NOT ACTUALLY INDEX, CHECK NUMBER OF INTERSECTIONS FOR DEBUG
+					intersect_point = tmp_intersect;
+					normal = tmp_normal;
+				}
+			}
+		}
+		//store all metaballs that ray intersections - naive way: keep an array and populate it
+
+		thrust::sort_by_key(thrust::seq, ballDist + offset, ballDist + offset + count, ballHits + offset);
+
+		float final_t = ballDist[offset];
+
+		// find first positive influence
+
+		int first;
+		float density = 0.f;
+		for (first = 0; first < count; ++first) {
+			// calculate influence
+			float s = glm::dot(pathSegment.ray.direction, ballHits[offset + first].translation - pathSegment.ray.origin);
+			glm::vec3 x = pathSegment.ray.origin + s * pathSegment.ray.direction;
+
+			density = 0.f;
+			for (int j = 0; j < count; ++j) {
+				float dist = glm::distance(x, ballHits[offset + j].translation);
+				if (dist < ballHits[offset + j].radius) {
+					density += 1.0f - dist * dist/ ballHits[offset + j].radius;
+				}
+			}
+
+			if (density > THRESHOLD) break;
+		}
+
+		//do the secant method
+		//do dichotomic method
+
+
 		// naive parse through global geoms
 
-		for (int i = 0; i < geoms_size; i++)
+		for (int i = 0; i < 0; i++) // SET TO 0 TO IGNORE GEOMS
 		{
 			Geom & geom = geoms[i];
 
@@ -205,10 +277,17 @@ __global__ void computeIntersections(
 		else
 		{
 			//The ray hits something
-			intersections[path_index].t = t_min;
-			intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+			//intersections[path_index].t = t_min;
+			intersections[path_index].t = final_t;
+			intersections[path_index].debug = fabsf(density);
+			//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
+			intersections[path_index].materialId = count;
 			intersections[path_index].surfaceNormal = normal;
 		}
+
+		//delete[] ballDist;
+		//delete[] ballHits;
+
 	}
 }
 
@@ -263,6 +342,27 @@ __global__ void shadeFakeMaterial (
       pathSegments[idx].color = glm::vec3(0.0f);
     }
   }
+}
+
+__global__ void shadeMetaballs(
+	int iter
+	, int num_paths
+	, ShadeableIntersection * shadeableIntersections
+	, PathSegment * pathSegments
+	, Material * materials
+)
+{
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < num_paths)
+	{
+		ShadeableIntersection intersection = shadeableIntersections[idx];
+		if (intersection.t > 0.0f) { // if the intersection exists...
+			pathSegments[idx].color = glm::vec3(intersection.debug);
+		}
+		else {
+			pathSegments[idx].color = glm::vec3(0.1f);
+		}
+	}
 }
 
 // Add the current iteration's output to the overall image
@@ -351,6 +451,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		, dev_geoms
 		, hst_scene->geoms.size()
 		, dev_intersections
+		, dev_metaballs
+		, dev_ballHits
+		, dev_ballDist
 		);
 	checkCUDAError("trace one bounce");
 	cudaDeviceSynchronize();
@@ -366,7 +469,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
   // TODO: compare between directly shading the path segments and shading
   // path segments that have been reshuffled to be contiguous in memory.
 
-  shadeFakeMaterial<<<numblocksPathSegmentTracing, blockSize1d>>> (
+  shadeMetaballs<<<numblocksPathSegmentTracing, blockSize1d>>> (
     iter,
     num_paths,
     dev_intersections,

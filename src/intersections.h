@@ -142,3 +142,51 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
 
     return glm::length(r.origin - intersectionPoint);
 }
+
+__host__ __device__ float rayMarchTest(Metaball ball, Ray r,
+	glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) 
+{
+
+	Ray rt;
+	rt.origin = r.origin + ball.translation;
+	rt.direction = r.direction;
+
+	float radius = ball.radius;
+
+	float vDotDirection = glm::dot(rt.origin, rt.direction);
+	float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
+	if (radicand < 0) {
+		return -1;
+	}
+	// TODO
+
+	float squareRoot = sqrt(radicand);
+	float firstTerm = -vDotDirection;
+	float t1 = firstTerm + squareRoot;
+	float t2 = firstTerm - squareRoot;
+
+	float t = 0;
+	if (t1 < 0 && t2 < 0) {
+		return -1;
+	}
+	else if (t1 > 0 && t2 > 0) {
+		t = min(t1, t2);
+		outside = true;
+	}
+	else {
+		t = max(t1, t2);
+		outside = false;
+	}
+
+	glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
+
+	intersectionPoint = objspaceIntersection - ball.translation;
+	normal = glm::normalize(objspaceIntersection);
+	if (!outside) {
+		normal = -normal;
+	}
+
+	return glm::length(r.origin - intersectionPoint);
+}
+
+

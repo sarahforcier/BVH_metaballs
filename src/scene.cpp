@@ -30,6 +30,7 @@ Scene::Scene(string filename) {
             }
         }
     }
+	loadMetaballs();
 }
 
 int Scene::loadGeom(string objectid) {
@@ -87,6 +88,22 @@ int Scene::loadGeom(string objectid) {
         geoms.push_back(newGeom);
         return 1;
     }
+}
+
+int Scene::loadMetaballs() {
+	Metaball ball1;
+	ball1.radius = 1.f;
+	ball1.materialid = 0;
+	ball1.translation = glm::vec3(0.f);
+	metaballs.push_back(ball1);
+
+	Metaball ball2;
+	ball2.radius = 1.f;
+	ball2.materialid = 1;
+	ball2.translation = glm::vec3(1.f, 0.f, 0.f);
+	metaballs.push_back(ball2);
+
+	return 1;
 }
 
 int Scene::loadCamera() {
