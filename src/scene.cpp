@@ -30,7 +30,7 @@ Scene::Scene(string filename) {
             }
         }
     }
-	loadMetaballs();
+	loadMetaballs(3);
 }
 
 int Scene::loadGeom(string objectid) {
@@ -90,20 +90,27 @@ int Scene::loadGeom(string objectid) {
     }
 }
 
-int Scene::loadMetaballs() {
-	Metaball ball1;
-	ball1.radius = 1.f;
-	ball1.materialid = 0;
-	ball1.translation = glm::vec3(0.f);
-	metaballs.push_back(ball1);
+int Scene::loadMetaballs(int num) 
+{
+	
+	float step = 10.f / num;
+	for (int i = 0; i < num; ++i) {
+		for (int j = 0; j < num; ++j) {
+			for (int k = 0; k < num; ++k) {
+				Metaball ball;
+				ball.radius = 1.f;
+				ball.materialid = 0;
 
-	Metaball ball2;
-	ball2.radius = 1.f;
-	ball2.materialid = 1;
-	ball2.translation = glm::vec3(1.2f, 0.f, 0.f);
-	metaballs.push_back(ball2);
-
-	return 1;
+				float x = step * (float(i) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);
+				float y = step * (float(j) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);;
+				float z = step * (float(k) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);;
+				ball.translation = glm::vec3(x, y, z);
+				ball.velocity = glm::normalize(ball.translation);
+				metaballs.push_back(ball);
+			}
+		}
+	}
+return 1;
 }
 
 int Scene::loadCamera() {

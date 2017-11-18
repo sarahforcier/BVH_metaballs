@@ -15,7 +15,7 @@ private:
     ifstream fp_in;
     int loadMaterial(string materialid);
     int loadGeom(string objectid);
-	int loadMetaballs();
+	int loadMetaballs(int num);
     int loadCamera();
 public:
     Scene(string filename);

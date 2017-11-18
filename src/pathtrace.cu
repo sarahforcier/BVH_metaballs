@@ -17,7 +17,6 @@
 
 #define ERRORCHECK 1
 
-#define NUM_BALLS 2
 #define THRESHOLD 0.2
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -103,11 +102,11 @@ void pathtraceInit(Scene *scene) {
   	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
     // TODO: initialize any extra device memeory you need
-	cudaMalloc(&dev_metaballs, NUM_BALLS * sizeof(Metaball));
-	cudaMemcpy(dev_metaballs, scene->metaballs.data(), NUM_BALLS * sizeof(Metaball), cudaMemcpyHostToDevice);
+	cudaMalloc(&dev_metaballs, scene->metaballs.size() * sizeof(Metaball));
+	cudaMemcpy(dev_metaballs, scene->metaballs.data(), scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
 
-	cudaMalloc(&dev_ballHits, NUM_BALLS * pixelcount * sizeof(Metaball));
-	cudaMalloc(&dev_ballDist, NUM_BALLS * pixelcount * sizeof(float));
+	cudaMalloc(&dev_ballHits, scene->metaballs.size() * pixelcount * sizeof(Metaball));
+	cudaMalloc(&dev_ballDist, scene->metaballs.size() * pixelcount * sizeof(float));
 
     checkCUDAError("pathtraceInit");
 }
@@ -191,8 +190,10 @@ __global__ void computeIntersections(
 	, int geoms_size
 	, ShadeableIntersection * intersections
 	, Metaball * metaballs
+	, int ball_size
 	, Metaball * ballHits
 	, float * ballDist
+	, int iter
 	)
 {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
@@ -213,14 +214,12 @@ __global__ void computeIntersections(
 
 		//TODO 
 		//find metaball intersection
-
 		//loop over all metaballs and add to intersections along ray
-
 		int count = 0;
-		int offset = path_index * NUM_BALLS;
-		for (int i = 0; i < NUM_BALLS; i++) {
+		int offset = path_index * ball_size;
+		for (int i = 0; i < ball_size; i++) {
 			Metaball & ball = metaballs[i];
-			t = rayMarchTest(ball, pathSegment.ray, tmp_intersect, tmp_normal, outside);
+			t = rayMarchTest(ball, iter, pathSegment.ray, tmp_intersect, tmp_normal, outside);
 			if (t > 0.0f)
 			{
 				ballHits[offset + count] = ball;
@@ -342,15 +341,19 @@ __global__ void computeIntersections(
 	}
 }
 
-// LOOK: "fake" shader demonstrating what you might do with the info in
-// a ShadeableIntersection, as well as how to use thrust's random number
-// generator. Observe that since the thrust random number generator basically
-// adds "noise" to the iteration, the image should start off noisy and get
-// cleaner as more iterations are computed.
-//
-// Note that this shader does NOT do a BSDF evaluation!
-// Your shaders should handle that - this can allow techniques such as
-// bump mapping.
+__global__ void translateMetaballs(int num_balls, Metaball * metaballs)
+{
+	int ball_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (ball_index < num_balls)
+	{
+		metaballs[ball_index].translation += metaballs[ball_index].velocity / 10.f;
+		if (metaballs[ball_index].translation.y > 10.f) {
+			metaballs[ball_index].translation.y = 0.f;
+		}
+	}
+}
+
 __global__ void shadeFakeMaterial (
   int iter
   , int num_paths
@@ -446,35 +449,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	// 1D block for path tracing
 	const int blockSize1d = 128;
 
-    ///////////////////////////////////////////////////////////////////////////
-
-    // Recap:
-    // * Initialize array of path rays (using rays that come out of the camera)
-    //   * You can pass the Camera object to that kernel.
-    //   * Each path ray must carry at minimum a (ray, color) pair,
-    //   * where color starts as the multiplicative identity, white = (1, 1, 1).
-    //   * This has already been done for you.
-    // * For each depth:
-    //   * Compute an intersection in the scene for each path ray.
-    //     A very naive version of this has been implemented for you, but feel
-    //     free to add more primitives and/or a better algorithm.
-    //     Currently, intersection distance is recorded as a parametric distance,
-    //     t, or a "distance along the ray." t = -1.0 indicates no intersection.
-    //     * Color is attenuated (multiplied) by reflections off of any object
-    //   * TODO: Stream compact away all of the terminated paths.
-    //     You may use either your implementation or `thrust::remove_if` or its
-    //     cousins.
-    //     * Note that you can't really use a 2D kernel launch any more - switch
-    //       to 1D.
-    //   * TODO: Shade the rays that intersected something or didn't bottom out.
-    //     That is, color the ray by performing a color computation according
-    //     to the shader, then generate a new ray to continue the ray path.
-    //     We recommend just updating the ray's PathSegment in place.
-    //     Note that this step may come before or after stream compaction,
-    //     since some shaders you write may also cause a path to terminate.
-    // * Finally, add this iteration's results to the image. This has been done
-    //   for you.
-
     // TODO: perform one iteration of path tracing
 
 	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d >>>(cam, iter, traceDepth, dev_paths);
@@ -493,6 +467,12 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	// clean shading chunks
 	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
+	// move metaballs
+	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
+	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
+	checkCUDAError("translate metaballs");
+	cudaDeviceSynchronize();
+
 	// tracing
 	dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
 	computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
@@ -503,8 +483,10 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		, hst_scene->geoms.size()
 		, dev_intersections
 		, dev_metaballs
+		, hst_scene->metaballs.size()
 		, dev_ballHits
 		, dev_ballDist
+		, iter
 		);
 	checkCUDAError("trace one bounce");
 	cudaDeviceSynchronize();

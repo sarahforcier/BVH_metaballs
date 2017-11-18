@@ -143,7 +143,7 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
     return glm::length(r.origin - intersectionPoint);
 }
 
-__host__ __device__ float rayMarchTest(Metaball ball, Ray r,
+__host__ __device__ float rayMarchTest(Metaball ball, int iter, Ray r,
 	glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) 
 {
 

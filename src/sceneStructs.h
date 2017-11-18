@@ -32,6 +32,7 @@ struct Metaball {
 	int materialid;
 	float radius;
 	glm::vec3 translation;
+	glm::vec3 velocity;
 };
 
 struct Material {
