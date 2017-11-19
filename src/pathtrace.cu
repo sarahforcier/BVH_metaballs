@@ -19,6 +19,9 @@
 
 #define THRESHOLD 0.2
 
+#define SECANTSTEPDEBUG 0
+#define MAXSECANTSTEPS 25
+
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
 void checkCUDAErrorFn(const char *msg, const char *file, int line) {
@@ -181,6 +184,14 @@ __device__ glm::vec3 calculateNormals(int count, Metaball * ballHits, int offset
 	return glm::normalize(normal);
 }
 
+__device__ glm::vec3 calculateColor(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+	glm::vec3 normal(0.f);
+	for (int j = 0; j < count; ++j) {
+		glm::vec3 diff = x - ballHits[j].translation;
+		normal += ballHits[j].velocity / (glm::length2(diff) * glm::length2(diff));
+	}
+	return glm::normalize(normal);
+}
 // TODO:
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
@@ -272,7 +283,7 @@ __global__ void computeIntersections(
 		float f2 = 0;
 		int steps = 0;
 		glm::vec3 x2;
-		while (first != count && (t1 - t0 > 0.0001) && steps < 15) {
+		while (first != count && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
 			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
 			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
 			f2 = calculateDensity(count, ballHits, offset, x2);
@@ -288,6 +299,7 @@ __global__ void computeIntersections(
 		}
 
 		normal = calculateNormals(ball_size, metaballs, offset, x2);
+		glm::vec3 color_test = calculateColor(ball_size, metaballs, offset, x2);
 		final_t = (first != count) ? t2 : -1.f;
 
 
@@ -332,7 +344,13 @@ __global__ void computeIntersections(
 			//intersections[path_index].t = t_min;
 			intersections[path_index].t = final_t;
 
-			intersections[path_index].debug = normal;
+			intersections[path_index].debug = color_test;
+#if SECANTSTEPDEBUG
+			intersections[path_index].debug = glm::vec3(1.f,0.f,0.f);
+			if (steps >= MAXSECANTSTEPS) {
+				intersections[path_index].debug = glm::vec3(0.0f, 0.f, 1.f);
+			}
+#endif
 			//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 			intersections[path_index].materialId = count;
 			intersections[path_index].wo = pathSegment.ray.direction;
@@ -352,23 +370,23 @@ __global__ void translateMetaballs(int num_balls, Metaball * metaballs)
 	if (ball_index < num_balls)
 	{
 		metaballs[ball_index].translation += metaballs[ball_index].velocity / 10.f;
-		if (metaballs[ball_index].translation.y > 7.f) {
-			metaballs[ball_index].translation.y = -7.f;
+		if (metaballs[ball_index].translation.y > 5.f) {
+			metaballs[ball_index].translation.y = -5.f;
 		}
-		if (metaballs[ball_index].translation.y < -7.f) {
-			metaballs[ball_index].translation.y = 7.f;
+		if (metaballs[ball_index].translation.y < -5.f) {
+			metaballs[ball_index].translation.y = 5.f;
 		}
-		if (metaballs[ball_index].translation.z > 7.f) {
-			metaballs[ball_index].translation.z = -7.f;
+		if (metaballs[ball_index].translation.z > 5.f) {
+			metaballs[ball_index].translation.z = -5.f;
 		}
-		if (metaballs[ball_index].translation.z < -7.f) {
-			metaballs[ball_index].translation.z = 7.f;
+		if (metaballs[ball_index].translation.z < -5.f) {
+			metaballs[ball_index].translation.z = 5.f;
 		}
-		if (metaballs[ball_index].translation.x > 7.f) {
-			metaballs[ball_index].translation.x = -7.f;
+		if (metaballs[ball_index].translation.x > 5.f) {
+			metaballs[ball_index].translation.x = -5.f;
 		}
-		if (metaballs[ball_index].translation.x < -7.f) {
-			metaballs[ball_index].translation.x = 7.f;
+		if (metaballs[ball_index].translation.x < -5.f) {
+			metaballs[ball_index].translation.x = 5.f;
 		}
 	}
 }
@@ -433,8 +451,11 @@ __global__ void shadeMetaballs(
 		if (intersection.t > 0.0f) { // if the intersection exists...
 
 			glm::vec3 camdir = intersection.wo;
-			glm::vec3 lightdir = glm::normalize(glm::vec3(1, -1, 1));
-			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * glm::vec3(0.8f,0.f,0.f);
+			glm::vec3 lightpos = glm::vec3(0, 5, 7);
+			float NdotH = glm::dot(-camdir, intersection.surfaceNormal);
+			float specular = glm::pow(NdotH, 10.f);
+			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
+			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
 			//pathSegments[idx].color = camdir;
 		}
 		else {
