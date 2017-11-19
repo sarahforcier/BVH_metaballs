@@ -100,7 +100,7 @@ void saveImage() {
 
 void runCuda() {
     if (camchanged) {
-        iteration = 0;
+        //iteration = 0; avoid scene reconstruction when camera moves
         Camera &cam = renderState->camera;
         cameraPosition.x = zoom * sin(phi) * sin(theta);
         cameraPosition.y = zoom * cos(theta);

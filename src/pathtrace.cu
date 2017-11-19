@@ -58,9 +58,12 @@ __global__ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution,
         glm::vec3 pix = image[index];
 
         glm::ivec3 color;
-        color.x = glm::clamp((int) (pix.x / iter * 255.0), 0, 255);
-        color.y = glm::clamp((int) (pix.y / iter * 255.0), 0, 255);
-        color.z = glm::clamp((int) (pix.z / iter * 255.0), 0, 255);
+        //color.x = glm::clamp((int) (pix.x / iter * 255.0), 0, 255);
+        //color.y = glm::clamp((int) (pix.y / iter * 255.0), 0, 255);
+        //color.z = glm::clamp((int) (pix.z / iter * 255.0), 0, 255);
+		color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
+		color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
+		color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);
 
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
@@ -172,7 +175,7 @@ __device__ float calculateDensity(int count, Metaball * ballHits, int offset, gl
 __device__ glm::vec3 calculateNormals(int count, Metaball * ballHits, int offset, glm::vec3 x) {
 	glm::vec3 normal(0.f);
 	for (int j = 0; j < count; ++j) {
-		glm::vec3 diff = x - ballHits[offset + j].translation;
+		glm::vec3 diff = x - ballHits[j].translation;
 		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
 	}
 	return glm::normalize(normal);
@@ -269,7 +272,7 @@ __global__ void computeIntersections(
 		float f2 = 0;
 		int steps = 0;
 		glm::vec3 x2;
-		while (first != count && (t1 - t0 > 0.0001) && steps < 10) {
+		while (first != count && (t1 - t0 > 0.0001) && steps < 15) {
 			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
 			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
 			f2 = calculateDensity(count, ballHits, offset, x2);
@@ -284,7 +287,7 @@ __global__ void computeIntersections(
 			steps++;
 		}
 
-		normal = calculateNormals(count, ballHits, offset, x2);
+		normal = calculateNormals(ball_size, metaballs, offset, x2);
 		final_t = (first != count) ? t2 : -1.f;
 
 
@@ -332,6 +335,7 @@ __global__ void computeIntersections(
 			intersections[path_index].debug = normal;
 			//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 			intersections[path_index].materialId = count;
+			intersections[path_index].wo = pathSegment.ray.direction;
 			intersections[path_index].surfaceNormal = normal;
 		}
 
@@ -348,8 +352,23 @@ __global__ void translateMetaballs(int num_balls, Metaball * metaballs)
 	if (ball_index < num_balls)
 	{
 		metaballs[ball_index].translation += metaballs[ball_index].velocity / 10.f;
-		if (metaballs[ball_index].translation.y > 10.f) {
-			metaballs[ball_index].translation.y = 0.f;
+		if (metaballs[ball_index].translation.y > 7.f) {
+			metaballs[ball_index].translation.y = -7.f;
+		}
+		if (metaballs[ball_index].translation.y < -7.f) {
+			metaballs[ball_index].translation.y = 7.f;
+		}
+		if (metaballs[ball_index].translation.z > 7.f) {
+			metaballs[ball_index].translation.z = -7.f;
+		}
+		if (metaballs[ball_index].translation.z < -7.f) {
+			metaballs[ball_index].translation.z = 7.f;
+		}
+		if (metaballs[ball_index].translation.x > 7.f) {
+			metaballs[ball_index].translation.x = -7.f;
+		}
+		if (metaballs[ball_index].translation.x < -7.f) {
+			metaballs[ball_index].translation.x = 7.f;
 		}
 	}
 }
@@ -404,6 +423,7 @@ __global__ void shadeMetaballs(
 	, ShadeableIntersection * shadeableIntersections
 	, PathSegment * pathSegments
 	, Material * materials
+
 )
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -411,7 +431,11 @@ __global__ void shadeMetaballs(
 	{
 		ShadeableIntersection intersection = shadeableIntersections[idx];
 		if (intersection.t > 0.0f) { // if the intersection exists...
-			pathSegments[idx].color = intersection.debug;
+
+			glm::vec3 camdir = intersection.wo;
+			glm::vec3 lightdir = glm::normalize(glm::vec3(1, -1, 1));
+			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * glm::vec3(0.8f,0.f,0.f);
+			//pathSegments[idx].color = camdir;
 		}
 		else {
 			pathSegments[idx].color = glm::vec3(0.1f);
@@ -427,7 +451,7 @@ __global__ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterati
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
-		image[iterationPath.pixelIndex] += iterationPath.color;
+		image[iterationPath.pixelIndex] = iterationPath.color;
 	}
 }
 

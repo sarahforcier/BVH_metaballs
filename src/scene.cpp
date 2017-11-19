@@ -102,8 +102,8 @@ int Scene::loadMetaballs(int num)
 				ball.materialid = 0;
 
 				float x = step * (float(i) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);
-				float y = step * (float(j) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);;
-				float z = step * (float(k) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);;
+				float y = step * (float(j) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);
+				float z = step * (float(k) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX) - 0.5);
 				ball.translation = glm::vec3(x, y, z);
 				ball.velocity = glm::normalize(ball.translation);
 				metaballs.push_back(ball);
