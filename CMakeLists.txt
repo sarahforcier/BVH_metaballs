@@ -1,6 +1,6 @@
 cmake_minimum_required(VERSION 3.0)
 
-project(cis565_path_tracer)
+project(metaball_path_tracer)
 
 set(CMAKE_MODULE_PATH "${CMAKE_SOURCE_DIR}/cmake" ${CMAKE_MODULE_PATH})
 
