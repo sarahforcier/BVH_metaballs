@@ -2,6 +2,8 @@
 #include "preview.h"
 #include <cstring>
 
+#define MAX_ITERATIONS 4
+
 static std::string startTimeString;
 
 // For camera controls
@@ -22,6 +24,7 @@ glm::vec3 ogLookAt; // for recentering the camera
 Scene *scene;
 RenderState *renderState;
 int iteration;
+int iter_count;
 
 int width;
 int height;
@@ -45,6 +48,7 @@ int main(int argc, char** argv) {
 
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
+	iter_count = 0;
     renderState = &scene->state;
     Camera &cam = renderState->camera;
     width = cam.resolution.x;
@@ -131,11 +135,15 @@ void runCuda() {
     if (iteration < renderState->iterations) {
         uchar4 *pbo_dptr = NULL;
         iteration++;
+		iter_count++;
+		if (iter_count > MAX_ITERATIONS) {
+			iter_count = 0;
+		}
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
         // execute the kernel
         int frame = 0;
-        pathtrace(pbo_dptr, frame, iteration);
+        pathtrace(pbo_dptr, frame, iter_count);
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);

@@ -18,9 +18,11 @@
 #define ERRORCHECK 1
 
 #define THRESHOLD 0.2
+#define MAX_BVH_DEPTH 5
 
 #define SECANTSTEPDEBUG 0
-#define MAXSECANTSTEPS 25
+#define MAXSECANTSTEPS 30
+#define MAXDICHOTOMICSTEPS 30
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -87,6 +89,7 @@ static ShadeableIntersection * dev_intersections = NULL;
 static Metaball * dev_metaballs = NULL;
 static Metaball * dev_ballHits = NULL;
 static float * dev_ballDist = NULL;
+static BVHNode * dev_bvhTree = NULL;
 
 void pathtraceInit(Scene *scene) {
     hst_scene = scene;
@@ -114,9 +117,10 @@ void pathtraceInit(Scene *scene) {
 	cudaMalloc(&dev_ballHits, scene->metaballs.size() * pixelcount * sizeof(Metaball));
 	cudaMalloc(&dev_ballDist, scene->metaballs.size() * pixelcount * sizeof(float));
 
+	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode));
+
     checkCUDAError("pathtraceInit");
 }
-
 
 void pathtraceFree() {
     cudaFree(dev_image);  // no-op if dev_image is null
@@ -128,6 +132,7 @@ void pathtraceFree() {
 	cudaFree(dev_metaballs);
 	cudaFree(dev_ballHits);
 	cudaFree(dev_ballDist);
+	cudaFree(dev_bvhTree);
     checkCUDAError("pathtraceFree");
 }
 
@@ -190,8 +195,9 @@ __device__ glm::vec3 calculateColor(int count, Metaball * ballHits, int offset, 
 		glm::vec3 diff = x - ballHits[j].translation;
 		normal += ballHits[j].velocity / (glm::length2(diff) * glm::length2(diff));
 	}
-	return glm::normalize(normal);
+	return glm::abs(glm::normalize(normal));
 }
+
 // TODO:
 // computeIntersections handles generating ray intersections ONLY.
 // Generating new rays is handled in your shader(s).
@@ -302,8 +308,6 @@ __global__ void computeIntersections(
 		glm::vec3 color_test = calculateColor(ball_size, metaballs, offset, x2);
 		final_t = (first != count) ? t2 : -1.f;
 
-
-
 		// TODO do dichotomic method
 
 
@@ -371,23 +375,30 @@ __global__ void translateMetaballs(int num_balls, Metaball * metaballs)
 	{
 		metaballs[ball_index].translation += metaballs[ball_index].velocity / 10.f;
 		if (metaballs[ball_index].translation.y > 5.f) {
-			metaballs[ball_index].translation.y = -5.f;
-		}
-		if (metaballs[ball_index].translation.y < -5.f) {
+			metaballs[ball_index].velocity.y *= -1.f;
 			metaballs[ball_index].translation.y = 5.f;
 		}
-		if (metaballs[ball_index].translation.z > 5.f) {
-			metaballs[ball_index].translation.z = -5.f;
+		if (metaballs[ball_index].translation.y < -5.f) {
+			metaballs[ball_index].velocity.y *= -1.f;
+			metaballs[ball_index].translation.y = -5.f;
 		}
-		if (metaballs[ball_index].translation.z < -5.f) {
+		if (metaballs[ball_index].translation.z > 5.f) {
+			metaballs[ball_index].velocity.z *= -1.f;
 			metaballs[ball_index].translation.z = 5.f;
 		}
-		if (metaballs[ball_index].translation.x > 5.f) {
-			metaballs[ball_index].translation.x = -5.f;
+		if (metaballs[ball_index].translation.z < -5.f) {
+			metaballs[ball_index].velocity.z *= -1.f;
+			metaballs[ball_index].translation.z = -5.f;
 		}
-		if (metaballs[ball_index].translation.x < -5.f) {
+		if (metaballs[ball_index].translation.x > 5.f) {
+			metaballs[ball_index].velocity.x *= -1.f;
 			metaballs[ball_index].translation.x = 5.f;
 		}
+		if (metaballs[ball_index].translation.x < -5.f) {
+			metaballs[ball_index].velocity.x *= -1.f;
+			metaballs[ball_index].translation.x = -5.f;
+		}
+		
 	}
 }
 
@@ -455,7 +466,9 @@ __global__ void shadeMetaballs(
 			float NdotH = glm::dot(-camdir, intersection.surfaceNormal);
 			float specular = glm::pow(NdotH, 10.f);
 			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
+#if SECANTSTEPDEBUG == 0
 			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
+#endif
 			//pathSegments[idx].color = camdir;
 		}
 		else {
@@ -517,6 +530,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
 	checkCUDAError("translate metaballs");
 	cudaDeviceSynchronize();
+
+
 
 	// tracing
 	dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;

@@ -35,6 +35,16 @@ struct Metaball {
 	glm::vec3 velocity;
 };
 
+struct BVHNode {
+	glm::vec3 minB;
+	glm::vec3 maxB;
+	int startM;
+	int endM;
+	int startS;
+	int endS;
+	bool isLeaf;
+};
+
 struct Material {
     glm::vec3 color;
     struct {
