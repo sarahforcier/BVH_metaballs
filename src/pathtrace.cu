@@ -14,6 +14,7 @@
 #include "pathtrace.h"
 #include "intersections.h"
 #include "interactions.h"
+#include "bvh.h"
 
 #define ERRORCHECK 1
 
@@ -90,6 +91,8 @@ static Metaball * dev_metaballs = NULL;
 static Metaball * dev_ballHits = NULL;
 static float * dev_ballDist = NULL;
 static BVHNode * dev_bvhTree = NULL;
+
+
 
 void pathtraceInit(Scene *scene) {
     hst_scene = scene;
@@ -398,8 +401,9 @@ __global__ void translateMetaballs(int num_balls, Metaball * metaballs)
 			metaballs[ball_index].velocity.x *= -1.f;
 			metaballs[ball_index].translation.x = -5.f;
 		}
-		
+
 	}
+
 }
 
 __global__ void shadeFakeMaterial (
@@ -531,6 +535,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	checkCUDAError("translate metaballs");
 	cudaDeviceSynchronize();
 
+	constructBVHTree(3, dev_metaballs, hst_scene);
 
 
 	// tracing

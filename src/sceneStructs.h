@@ -43,6 +43,9 @@ struct BVHNode {
 	int startS;
 	int endS;
 	bool isLeaf;
+	int id;
+	int child1id;
+	int child2id;
 };
 
 struct Material {
