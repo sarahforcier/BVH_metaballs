@@ -21,12 +21,13 @@
 #define MAXSECANTSTEPS 30
 
 //METABALL FUNCTIONS
-__device__ float calculateDensity(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+__device__ float calculateDensity(int count, Metaball * metaballs, int * ballHits, int offset, glm::vec3 x) {
 	float density = 0.f;
 	for (int j = 0; j < count; ++j) {
-		float dist = glm::distance(x, ballHits[offset + j].translation);
-		if (dist < ballHits[offset + j].radius) {
-			float val = 1.0f - dist * dist / (ballHits[offset + j].radius * ballHits[offset + j].radius);
+		Metaball ball = metaballs[ballHits[offset + j]];
+		float dist = glm::distance(x, ball.translation);
+		if (dist < metaballs[ballHits[offset + j]].radius) {
+			float val = 1.0f - dist * dist / (ball.radius * ball.radius);
 			density += val * val;
 		}
 	}
@@ -34,20 +35,21 @@ __device__ float calculateDensity(int count, Metaball * ballHits, int offset, gl
 	return density;
 }
 
-__device__ glm::vec3 calculateNormals(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+__device__ glm::vec3 calculateNormals(int count, Metaball * metaballs, int offset, glm::vec3 x) {
 	glm::vec3 normal(0.f);
 	for (int j = 0; j < count; ++j) {
-		glm::vec3 diff = x - ballHits[j].translation;
+		glm::vec3 diff = x - metaballs[j].translation;
 		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
 	}
 	return glm::normalize(normal);
 }
 
-__device__ glm::vec3 calculateColor(int count, Metaball * ballHits, int offset, glm::vec3 x) {
+__device__ glm::vec3 calculateColor(int count, Metaball * metaballs, int offset, glm::vec3 x) {
 	glm::vec3 normal(0.f);
 	for (int j = 0; j < count; ++j) {
-		glm::vec3 diff = x - ballHits[j].translation;
-		normal += ballHits[j].velocity / (glm::length2(diff) * glm::length2(diff));
+		Metaball ball = metaballs[j];
+		glm::vec3 diff = x - ball.translation;
+		normal += ball.velocity / (glm::length2(diff) * glm::length2(diff));
 	}
 	return glm::abs(glm::normalize(normal));
 }
@@ -314,7 +316,7 @@ __global__ void computeBVHIntersections(
 	, Geom* geoms
 	, Metaball * metaballs
 	, int ball_size
-	, Metaball * ballHits
+	, int * ballHits
 	, float * ballDist
 	, int iter
 )
@@ -400,7 +402,7 @@ __global__ void computeBVHIntersections(
 				t = rayMarchTest(ball, iter, pathSegment.ray, tmp_intersect, tmp_normal, outside);
 				if (t > 0.0f)
 				{
-					ballHits[offset + count] = ball;
+					ballHits[offset + count] = m;
 					ballDist[offset + count] = t;
 					count++;
 					if (t_min > t) {
@@ -442,7 +444,7 @@ __global__ void computeBVHIntersections(
 
 		float final_t = ballDist[offset];
 
-		glm::vec3 debug_vector = ballHits[offset].translation;
+		glm::vec3 debug_vector = metaballs[ballHits[offset]].translation;
 
 		// find first positive influence
 
@@ -452,10 +454,10 @@ __global__ void computeBVHIntersections(
 		glm::vec3 x;
 		for (first = 0; first < count; ++first) {
 			// calculate influence
-			s = glm::dot(pathSegment.ray.direction, ballHits[offset + first].translation - pathSegment.ray.origin);
+			s = glm::dot(pathSegment.ray.direction, metaballs[ballHits[offset + first]].translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
 
-			density = calculateDensity(count, ballHits, offset, x);
+			density = calculateDensity(count, metaballs, ballHits, offset, x);
 			if (density > 0) {
 				break;
 			}
@@ -466,7 +468,7 @@ __global__ void computeBVHIntersections(
 		float t1 = s;
 
 		float f1 = density;
-		float f0 = calculateDensity(count, ballHits, offset, pathSegment.ray.origin);
+		float f0 = calculateDensity(count, metaballs, ballHits, offset, pathSegment.ray.origin);
 		float t2 = 0;
 		float f2 = 0;
 		int steps = 0;
@@ -474,7 +476,7 @@ __global__ void computeBVHIntersections(
 		while (first != count && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
 			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
 			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
-			f2 = calculateDensity(count, ballHits, offset, x2);
+			f2 = calculateDensity(count, metaballs, ballHits, offset, x2);
 			if (f2 > 0) {
 				t1 = t2;
 				f1 = f2;

@@ -88,11 +88,11 @@ static ShadeableIntersection * dev_intersections = NULL;
 
 // TODO: static variables for device memory, any extra info you need, etc
 static Metaball * dev_metaballs = NULL;
-static Metaball * dev_ballHits = NULL;
+static int * dev_ballHits = NULL;
 static float * dev_ballDist = NULL;
+static int * dev_headPtrBuffer = NULL;
+static LLNode * dev_nodeBuffer = NULL;
 static BVHNode * dev_bvhTree = NULL;
-
-
 
 void pathtraceInit(Scene *scene) {
     hst_scene = scene;
@@ -113,13 +113,20 @@ void pathtraceInit(Scene *scene) {
   	cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
   	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
-    // TODO: initialize any extra device memeory you need
+    // metaball memory
 	cudaMalloc(&dev_metaballs, scene->metaballs.size() * sizeof(Metaball));
 	cudaMemcpy(dev_metaballs, scene->metaballs.data(), scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
 
-	cudaMalloc(&dev_ballHits, scene->metaballs.size() * pixelcount * sizeof(Metaball));
-	cudaMalloc(&dev_ballDist, scene->metaballs.size() * pixelcount * sizeof(float));
+	cudaMalloc(&dev_ballDist, scene->metaballs.size() * sizeof(float)); 
 
+	// initialize Linked List
+	cudaMalloc(&dev_headPtrBuffer, pixelcount * sizeof(int));
+	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
+
+	cudaMalloc(&dev_nodeBuffer, scene->metaballs.size() * pixelcount * sizeof(LLNode));
+	cudaMemset(dev_nodeBuffer, -1, scene->metaballs.size() * pixelcount * sizeof(LLNode));
+
+	// initialize for Split BVH
 	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode));
 
     checkCUDAError("pathtraceInit");
@@ -133,8 +140,9 @@ void pathtraceFree() {
   	cudaFree(dev_intersections);
     // TODO: clean up any extra device memory you created
 	cudaFree(dev_metaballs);
-	cudaFree(dev_ballHits);
 	cudaFree(dev_ballDist);
+	cudaFree(dev_headPtrBuffer);
+	cudaFree(dev_nodeBuffer);
 	cudaFree(dev_bvhTree);
     checkCUDAError("pathtraceFree");
 }
@@ -157,7 +165,7 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 		PathSegment & segment = pathSegments[index];
 
 		segment.ray.origin = cam.position;
-    segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
+		segment.color = glm::vec3(1.0f, 1.0f, 1.0f);
 
 		// TODO: implement antialiasing by jittering the ray
 		segment.ray.direction = glm::normalize(cam.view
@@ -184,8 +192,6 @@ __global__ void computeIntersections(
 	, ShadeableIntersection * intersections
 	, Metaball * metaballs
 	, int ball_size
-	, Metaball * ballHits
-	, float * ballDist
 	, int iter
 	)
 {
@@ -215,9 +221,6 @@ __global__ void computeIntersections(
 			t = rayMarchTest(ball, iter, pathSegment.ray, tmp_intersect, tmp_normal, outside);
 			if (t > 0.0f)
 			{
-				ballHits[offset + count] = ball;
-				ballDist[offset + count] = t;
-				count++;
 	
 				if (t_min > t) {
 					t_min = t;
@@ -229,11 +232,10 @@ __global__ void computeIntersections(
 		}
 		//store all metaballs that ray intersections - naive way: keep an array and populate it
 
-		thrust::sort_by_key(thrust::seq, ballDist + offset, ballDist + offset + count, ballHits + offset);
-
 		float final_t = ballDist[offset];
 
-		glm::vec3 debug_vector = ballHits[offset].translation;
+		// first hit metaball along ray
+		glm::vec3 debug_vector = metaballs[ballHits[offset]].translation;
 
 		// find first positive influence
 
@@ -243,10 +245,10 @@ __global__ void computeIntersections(
 		glm::vec3 x;
 		for (first = 0; first < count; ++first) {
 			// calculate influence
-			s = glm::dot(pathSegment.ray.direction, ballHits[offset + first].translation - pathSegment.ray.origin);
+			s = glm::dot(pathSegment.ray.direction, metaballs[ballHits[offset + first]].translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
 
-			density = calculateDensity(count, ballHits, offset, x);
+			density = calculateDensity(count, metaballs, ballHits, offset, x);
 			if (density > 0) {
 				break;
 			}
@@ -257,7 +259,7 @@ __global__ void computeIntersections(
 		float t1 = s;
 		
 		float f1 = density;
-		float f0 = calculateDensity(count, ballHits, offset, pathSegment.ray.origin);
+		float f0 = calculateDensity(count, metaballs, ballHits, offset, pathSegment.ray.origin);
 		float t2 = 0;
 		float f2 = 0;
 		int steps = 0;
@@ -265,7 +267,7 @@ __global__ void computeIntersections(
 		while (first != count && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
 			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
 			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
-			f2 = calculateDensity(count, ballHits, offset, x2);
+			f2 = calculateDensity(count, metaballs, ballHits, offset, x2);
 			if (f2 > 0) {
 				t1 = t2;
 				f1 = f2;
@@ -376,6 +378,16 @@ __global__ void translateMetaballs(int num_balls, Metaball * metaballs)
 
 }
 
+__global__ void computeBallDist(int num_balls, glm::vec3 cam_pos, Metaball * metaballs, float * ballDist)
+{
+	int ball_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (ball_index < num_balls)
+	{
+		ballDist[ball_index] = glm::distance(cam_pos, metaballs[ball_index].translation) - metaballs->radius;
+	}
+}
+
 __global__ void shadeFakeMaterial (
   int iter
   , int num_paths
@@ -482,8 +494,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	// 1D block for path tracing
 	const int blockSize1d = 128;
 
-    // TODO: perform one iteration of path tracing
-
 	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d >>>(cam, iter, traceDepth, dev_paths);
 	checkCUDAError("generate camera ray");
 
@@ -491,100 +501,103 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
 
-	// --- PathSegment Tracing Stage ---
-	// Shoot ray into scene, bounce between objects, push shading chunks
-
-  bool iterationComplete = false;
-  startCpuTimer();
-	while (!iterationComplete) {
-
-	// clean shading chunks
-	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-
 	// move metaballs
 	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
 	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
 	checkCUDAError("translate metaballs");
-	cudaDeviceSynchronize();
 
-	dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+	// calculate ball distance from camera
+	computeBallDist << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), hst_scene->state.camera.position, dev_metaballs, dev_ballDist);
+	checkCUDAError("ball distance computation");
 
-#if BVH == 0
-	// tracing
-	computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
-		depth
-		, num_paths
-		, dev_paths
-		, dev_geoms
-		, hst_scene->geoms.size()
-		, dev_intersections
-		, dev_metaballs
-		, hst_scene->metaballs.size()
-		, dev_ballHits
-		, dev_ballDist
-		, iter
-		);
-	checkCUDAError("trace one bounce");
-	cudaDeviceSynchronize();
-	depth++;
+	// sort metaballs based on distance from camera
+	// so when added to linked list, already in order
+	thrust::sort_by_key(thrust::seq, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs);
+	checkCUDAError("sort metaball distance");
+
+	bool iterationComplete = false;
+	startCpuTimer();
+	while (!iterationComplete) {
+
+		// clean shading chunks
+		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
+
+		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+
+#if !BVH
+		// tracing
+		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
+			depth
+			, num_paths
+			, dev_paths
+			, dev_geoms
+			, hst_scene->geoms.size()
+			, dev_intersections
+			, dev_metaballs
+			, hst_scene->metaballs.size()
+			, iter
+			);
+		checkCUDAError("trace one bounce");
+		cudaDeviceSynchronize();
+		depth++;
 
 #else 
 
-constructBVHTree(MAX_BVH_DEPTH, dev_metaballs, dev_bvhTree, hst_scene);
+		constructBVHTree(MAX_BVH_DEPTH, dev_metaballs, dev_bvhTree, hst_scene);
 
-int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
-dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
+		int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
+		dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
 
-kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
+		kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
 
-checkCUDAError("setBVHTransform");
-cudaDeviceSynchronize();
+		checkCUDAError("setBVHTransform");
+		cudaDeviceSynchronize();
 
-computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
-		depth
-		, num_paths
-		, dev_paths
-		, dev_intersections
-		, dev_bvhTree
-		, num_BVHnodes
-		, dev_geoms
-		, dev_metaballs
-		, hst_scene->metaballs.size()
-		, dev_ballHits
-		, dev_ballDist
-		, iter
-		);
-	checkCUDAError("trace one bounce");
-	cudaDeviceSynchronize();
-	depth++;
+		computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+			depth
+			, num_paths
+			, dev_paths
+			, dev_intersections
+			, dev_bvhTree
+			, num_BVHnodes
+			, dev_geoms
+			, dev_metaballs
+			, hst_scene->metaballs.size()
+			, dev_ballHits
+			, dev_ballDist
+			, iter
+			);
+		checkCUDAError("trace one bounce");
+		cudaDeviceSynchronize();
+		depth++;
 
 #endif
-	// TODO:
-	// --- Shading Stage ---
-	// Shade path segments based on intersections and generate new rays by
-  // evaluating the BSDF.
-  // Start off with just a big kernel that handles all the different
-  // materials you have in the scenefile.
-  // TODO: compare between directly shading the path segments and shading
-  // path segments that have been reshuffled to be contiguous in memory.
 
-  shadeMetaballs<<<numblocksPathSegmentTracing, blockSize1d>>> (
-    iter,
-    num_paths,
-    dev_intersections,
-    dev_paths,
-    dev_materials
-  );
-  iterationComplete = true; // TODO: should be based off stream compaction results.
+		// TODO:
+		// --- Shading Stage ---
+			// Shade path segments based on intersections and generate new rays by
+			// evaluating the BSDF.
+			// Start off with just a big kernel that handles all the different
+			// materials you have in the scenefile.
+			// TODO: compare between directly shading the path segments and shading
+			// path segments that have been reshuffled to be contiguous in memory.
+
+		shadeMetaballs<<<numblocksPathSegmentTracing, blockSize1d>>> (
+			iter,
+			num_paths,
+			dev_intersections,
+			dev_paths,
+			dev_materials
+			);
+		iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
-
 
 	printf("Iteration Done\n");
 	endCpuTimer();
 	printTime();
 
-  // Assemble this iteration and apply it to the image
-  dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
+	// Assemble this iteration and apply it to the image
+	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
 	finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
 
     ///////////////////////////////////////////////////////////////////////////
