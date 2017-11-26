@@ -19,11 +19,10 @@
 
 #define ERRORCHECK 1
 
-#define THRESHOLD 0.2
+#define BVH 0
 #define MAX_BVH_DEPTH 5
 
 #define SECANTSTEPDEBUG 0
-#define MAXSECANTSTEPS 30
 #define MAXDICHOTOMICSTEPS 30
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -171,36 +170,6 @@ __global__ void generateRayFromCamera(Camera cam, int iter, int traceDepth, Path
 	}
 }
 
-__device__ float calculateDensity(int count, Metaball * ballHits, int offset, glm::vec3 x) {
-	float density = 0.f;
-	for (int j = 0; j < count; ++j) {
-		float dist = glm::distance(x, ballHits[offset + j].translation);
-		if (dist < ballHits[offset + j].radius) {
-			float val = 1.0f - dist * dist / (ballHits[offset + j].radius * ballHits[offset + j].radius);
-			density += val * val;
-		}
-	}
-	density -= THRESHOLD;
-	return density;
-}
-
-__device__ glm::vec3 calculateNormals(int count, Metaball * ballHits, int offset, glm::vec3 x) {
-	glm::vec3 normal(0.f);
-	for (int j = 0; j < count; ++j) {
-		glm::vec3 diff = x - ballHits[j].translation;
-		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
-	}
-	return glm::normalize(normal);
-}
-
-__device__ glm::vec3 calculateColor(int count, Metaball * ballHits, int offset, glm::vec3 x) {
-	glm::vec3 normal(0.f);
-	for (int j = 0; j < count; ++j) {
-		glm::vec3 diff = x - ballHits[j].translation;
-		normal += ballHits[j].velocity / (glm::length2(diff) * glm::length2(diff));
-	}
-	return glm::abs(glm::normalize(normal));
-}
 
 // TODO:
 // computeIntersections handles generating ray intersections ONLY.
@@ -473,6 +442,7 @@ __global__ void shadeMetaballs(
 			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
 #if SECANTSTEPDEBUG == 0
 			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
+			//pathSegments[idx].color = intersection.debug;
 #endif
 			//pathSegments[idx].color = camdir;
 		}
@@ -537,17 +507,10 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	checkCUDAError("translate metaballs");
 	cudaDeviceSynchronize();
 
-	constructBVHTree(3, dev_metaballs, dev_bvhTree, hst_scene);
-
-	const int blockSize1d1 = 128;//num_geoms
-	int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
-	dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
-
-	kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
-
-
-	// tracing
 	dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+
+#if BVH == 0
+	// tracing
 	computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
 		depth
 		, num_paths
@@ -565,7 +528,37 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	cudaDeviceSynchronize();
 	depth++;
 
+#else 
 
+constructBVHTree(MAX_BVH_DEPTH, dev_metaballs, dev_bvhTree, hst_scene);
+
+int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
+dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
+
+kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
+
+checkCUDAError("setBVHTransform");
+cudaDeviceSynchronize();
+
+computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+		depth
+		, num_paths
+		, dev_paths
+		, dev_intersections
+		, dev_bvhTree
+		, num_BVHnodes
+		, dev_geoms
+		, dev_metaballs
+		, hst_scene->metaballs.size()
+		, dev_ballHits
+		, dev_ballDist
+		, iter
+		);
+	checkCUDAError("trace one bounce");
+	cudaDeviceSynchronize();
+	depth++;
+
+#endif
 	// TODO:
 	// --- Shading Stage ---
 	// Shade path segments based on intersections and generate new rays by

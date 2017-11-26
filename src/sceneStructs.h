@@ -42,7 +42,7 @@ struct BVHNode {
 	int endM;
 	int startS;
 	int endS;
-	bool isLeaf;
+	bool isLeaf = true;
 	int id;
 	int child1id;
 	int child2id;

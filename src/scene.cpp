@@ -4,6 +4,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
+#define NUM_METABALLS_SQRT 7
+
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
     cout << " " << endl;
@@ -30,7 +32,7 @@ Scene::Scene(string filename) {
             }
         }
     }
-	loadMetaballs(3);
+	loadMetaballs(NUM_METABALLS_SQRT);
 }
 
 int Scene::loadGeom(string objectid) {
