@@ -12,6 +12,7 @@ set(SOURCE_FILES
     "scene.cpp"
     "scene.h"
     "sceneStructs.h"
+    "timer.h"
     "preview.h"
     "preview.cpp"
     "utilities.cpp"

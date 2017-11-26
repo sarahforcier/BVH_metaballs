@@ -15,6 +15,7 @@
 #include "intersections.h"
 #include "interactions.h"
 #include "bvh.h"
+#include "timer.h"
 
 #define ERRORCHECK 1
 
@@ -524,6 +525,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	// Shoot ray into scene, bounce between objects, push shading chunks
 
   bool iterationComplete = false;
+  startCpuTimer();
 	while (!iterationComplete) {
 
 	// clean shading chunks
@@ -535,7 +537,13 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	checkCUDAError("translate metaballs");
 	cudaDeviceSynchronize();
 
-	constructBVHTree(3, dev_metaballs, hst_scene);
+	constructBVHTree(3, dev_metaballs, dev_bvhTree, hst_scene);
+
+	const int blockSize1d1 = 128;//num_geoms
+	int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
+	dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
+
+	kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
 
 
 	// tracing
@@ -576,6 +584,11 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
   );
   iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
+
+
+	printf("Iteration Done\n");
+	endCpuTimer();
+	printTime();
 
   // Assemble this iteration and apply it to the image
   dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;

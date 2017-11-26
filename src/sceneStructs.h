@@ -46,6 +46,9 @@ struct BVHNode {
 	int id;
 	int child1id;
 	int child2id;
+	glm::mat4 transform;
+	glm::mat4 inverseTransform;
+	glm::mat4 invTranspose;
 };
 
 struct Material {

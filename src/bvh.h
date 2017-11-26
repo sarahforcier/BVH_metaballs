@@ -18,6 +18,16 @@
 
 #define NUM_BUCKETS 4
 
+__device__ glm::mat4 dev_buildTransformationMatrix(glm::vec3 translation, glm::vec3 rotation, glm::vec3 scale) {
+	float pi = 3.14159f;
+	glm::mat4 translationMat = glm::translate(glm::mat4(), translation);
+	glm::mat4 rotationMat = glm::rotate(glm::mat4(), rotation.x * (float)pi / 180, glm::vec3(1, 0, 0));
+	rotationMat = rotationMat * glm::rotate(glm::mat4(), rotation.y * (float)pi / 180, glm::vec3(0, 1, 0));
+	rotationMat = rotationMat * glm::rotate(glm::mat4(), rotation.z * (float)pi / 180, glm::vec3(0, 0, 1));
+	glm::mat4 scaleMat = glm::scale(glm::mat4(), scale);
+	return translationMat * rotationMat * scaleMat;
+}
+
 struct less_than_axis {
 	less_than_axis(int x, float val) : axis(x), val(val) {}
 	__host__ __device__ bool operator()(const Metaball & ball) const { return ball.translation[axis] < val; }
@@ -81,7 +91,7 @@ struct sum_sa {
 	}
 };
 
-void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, Scene * hst_scene) {
+void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVHNodes, Scene * hst_scene) {
 	int num_BVHnodes = (1 << (bvh_depth + 1)) - 1;
 	int num_geoms = hst_scene->metaballs.size();
 	/*int * BVHstart = new int[num_BVHnodes];
@@ -185,10 +195,72 @@ void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, Scene * hst_scene
 								 //kernCheckBounds << < numblocksGeoms, blockSize1d1 >> > (num_geoms, dev_geoms);
 
 								 //const int blockSize1d = 128; //num_BVHnodes
-								 //cudaMemcpy(dev_BVHnodes, BVHnodes.data(), num_BVHnodes * sizeof(BVHNode), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_BVHNodes, BVHnodes.data(), num_BVHnodes * sizeof(BVHNode), cudaMemcpyHostToDevice);
 								 //cudaMemcpy(dev_BVHstart, BVHstart.data(), num_BVHnodes * sizeof(int), cudaMemcpyHostToDevice);
 								 //cudaMemcpy(dev_BVHend, BVHend.data(), num_BVHnodes * sizeof(int), cudaMemcpyHostToDevice);
 								 //dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
 								 //kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_BVHnodes);
 
+}
+
+__global__ void kernSetBVHTransform(int n, BVHNode * BVHnodes) {
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	//printf("%i \n", idx);
+	if (idx > n) {
+		return;
+	}
+	BVHNode & node = BVHnodes[idx];
+	//printf("node: %i %f %f\n", idx, node.minb.x ,node.maxb.x);
+	glm::vec3 translate = (node.maxB + node.minB) / 2.0f;
+	glm::vec3 scale = (node.maxB - node.minB);
+	node.transform = dev_buildTransformationMatrix(
+		translate, glm::vec3(0.0f), scale);
+	node.inverseTransform = glm::inverse(node.transform);
+	node.invTranspose = glm::inverseTranspose(node.transform);
+	/*printf("idx: %i, trans: %f %f %f, scale %f %f %f\n", idx, translate.x, translate.y, translate.z,
+	scale.x, scale.y, scale.z);*/
+}
+
+__host__ __device__ float BVHIntersectionTest(BVHNode box, Ray r,
+	glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
+	Ray q;
+	q.origin = multiplyMV(box.inverseTransform, glm::vec4(r.origin, 1.0f));
+	q.direction = glm::normalize(multiplyMV(box.inverseTransform, glm::vec4(r.direction, 0.0f)));
+
+	float tmin = -1e38f;
+	float tmax = 1e38f;
+	glm::vec3 tmin_n;
+	glm::vec3 tmax_n;
+	for (int xyz = 0; xyz < 3; ++xyz) {
+		float qdxyz = q.direction[xyz];
+		/*if (glm::abs(qdxyz) > 0.00001f)*/ {
+			float t1 = (-0.5f - q.origin[xyz]) / qdxyz;
+			float t2 = (+0.5f - q.origin[xyz]) / qdxyz;
+			float ta = glm::min(t1, t2);
+			float tb = glm::max(t1, t2);
+			glm::vec3 n;
+			n[xyz] = t2 < t1 ? +1 : -1;
+			if (ta > 0 && ta > tmin) {
+				tmin = ta;
+				tmin_n = n;
+			}
+			if (tb < tmax) {
+				tmax = tb;
+				tmax_n = n;
+			}
+		}
+	}
+
+	if (tmax >= tmin && tmax > 0) {
+		outside = true;
+		if (tmin <= 0) {
+			tmin = tmax;
+			tmin_n = tmax_n;
+			outside = false;
+		}
+		intersectionPoint = multiplyMV(box.transform, glm::vec4(getPointOnRay(q, tmin), 1.0f));
+		normal = glm::normalize(multiplyMV(box.transform, glm::vec4(tmin_n, 0.0f)));
+		return glm::length(r.origin - intersectionPoint);
+	}
+	return -1;
 }
