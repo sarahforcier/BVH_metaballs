@@ -21,21 +21,26 @@
 #define MAXSECANTSTEPS 30
 
 //METABALL FUNCTIONS
-__device__ float calculateDensity(int count, Metaball * metaballs, int * ballHits, int offset, glm::vec3 x) {
+__device__ float calculateDensity(Metaball * metaballs, int first_node_idx, LLNode * nodeBuffer, glm::vec3 x) {
 	float density = 0.f;
-	for (int j = 0; j < count; ++j) {
-		Metaball ball = metaballs[ballHits[offset + j]];
-		float dist = glm::distance(x, ball.translation);
-		if (dist < metaballs[ballHits[offset + j]].radius) {
-			float val = 1.0f - dist * dist / (ball.radius * ball.radius);
+	int node_idx = first_node_idx;
+	Node * node;
+	Metaball * ball;
+	while (node_idx > 0) {
+		node = &nodeBuffer[node_idx];
+		ball = &metaballs[node->metaballid];
+		float dist = glm::distance(x, ball->translation);
+		if (dist < ball->radius) {
+			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
 			density += val * val;
 		}
+		node_idx = node->next;
 	}
 	density -= THRESHOLD;
 	return density;
 }
 
-__device__ glm::vec3 calculateNormals(int count, Metaball * metaballs, int offset, glm::vec3 x) {
+__device__ glm::vec3 calculateNormals(int count, Metaball * metaballs, glm::vec3 x) {
 	glm::vec3 normal(0.f);
 	for (int j = 0; j < count; ++j) {
 		glm::vec3 diff = x - metaballs[j].translation;
@@ -44,7 +49,7 @@ __device__ glm::vec3 calculateNormals(int count, Metaball * metaballs, int offse
 	return glm::normalize(normal);
 }
 
-__device__ glm::vec3 calculateColor(int count, Metaball * metaballs, int offset, glm::vec3 x) {
+__device__ glm::vec3 calculateColor(int count, Metaball * metaballs, glm::vec3 x) {
 	glm::vec3 normal(0.f);
 	for (int j = 0; j < count; ++j) {
 		Metaball ball = metaballs[j];

@@ -99,9 +99,10 @@ __host__ __device__ float boxIntersectionTest(Geom box, Ray r,
  * @param outside            Output param for whether the ray came from outside.
  * @return                   Ray parameter `t` value. -1 if no intersection.
  */
-__host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
-        glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) {
-    float radius = .5;
+__host__ __device__ 
+float sphereIntersectionTest(Geom sphere, Ray r, glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) 
+{
+    float radius = 0.5f;
 
     glm::vec3 ro = multiplyMV(sphere.inverseTransform, glm::vec4(r.origin, 1.0f));
     glm::vec3 rd = glm::normalize(multiplyMV(sphere.inverseTransform, glm::vec4(r.direction, 0.0f)));
@@ -143,10 +144,9 @@ __host__ __device__ float sphereIntersectionTest(Geom sphere, Ray r,
     return glm::length(r.origin - intersectionPoint);
 }
 
-__host__ __device__ float rayMarchTest(Metaball ball, int iter, Ray r,
-	glm::vec3 &intersectionPoint, glm::vec3 &normal, bool &outside) 
+__host__ __device__ 
+float rayMarchTest(Metaball ball, int iter, Ray r) 
 {
-
 	Ray rt;
 	rt.origin = r.origin - ball.translation;
 	rt.direction = r.direction;
@@ -156,7 +156,7 @@ __host__ __device__ float rayMarchTest(Metaball ball, int iter, Ray r,
 	float vDotDirection = glm::dot(rt.origin, rt.direction);
 	float radicand = vDotDirection * vDotDirection - (glm::dot(rt.origin, rt.origin) - powf(radius, 2));
 	if (radicand < 0) {
-		return -1;
+		return -1.f;
 	}
 	// TODO
 
@@ -171,20 +171,13 @@ __host__ __device__ float rayMarchTest(Metaball ball, int iter, Ray r,
 	}
 	else if (t1 > 0 && t2 > 0) {
 		t = min(t1, t2);
-		outside = true;
 	}
 	else {
 		t = max(t1, t2);
-		outside = false;
 	}
 
 	glm::vec3 objspaceIntersection = getPointOnRay(rt, t);
-
 	intersectionPoint = objspaceIntersection + ball.translation;
-	normal = glm::normalize(objspaceIntersection);
-	if (!outside) {
-		normal = -normal;
-	}
 
 	return glm::length(r.origin - intersectionPoint);
 }

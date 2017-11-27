@@ -37,7 +37,7 @@ struct Metaball {
 
 struct LLNode {
 	int metaballid;
-	int prev;
+	int next;
 };
 
 struct BVHNode {
