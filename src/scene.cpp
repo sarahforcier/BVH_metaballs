@@ -4,7 +4,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 10
+#define NUM_METABALLS_SQRT 15
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -96,9 +96,10 @@ int Scene::loadMetaballs(int num)
 {
 	
 	float step = 10.f / num;
-	for (int i = 0; i < num; ++i) {
-		for (int j = 0; j < num; ++j) {
-			for (int k = 0; k < num; ++k) {
+	int half_num = num / 2;
+	for (int i = -half_num; i < half_num; ++i) {
+		for (int j = -half_num; j < half_num; ++j) {
+			for (int k = -half_num; k < half_num; ++k) {
 				Metaball ball;
 				ball.radius = 1.f;
 				ball.materialid = 0;

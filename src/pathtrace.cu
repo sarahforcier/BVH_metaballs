@@ -23,6 +23,7 @@
 #define MAX_BVH_DEPTH 5
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
+#define MAXLISTSIZE 500
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -88,7 +89,6 @@ static PathSegment * dev_paths = NULL;
 static ShadeableIntersection * dev_intersections = NULL;
 
 static Metaball * dev_metaballs = NULL;
-static int * dev_ballHits = NULL;
 static float * dev_ballDist = NULL;
 static int * dev_LLcounter = NULL;
 static int * dev_headPtrBuffer = NULL;
@@ -125,8 +125,8 @@ void pathtraceInit(Scene *scene)
 	cudaMalloc(&dev_headPtrBuffer, pixelcount * sizeof(int));
 	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
 
-	cudaMalloc(&dev_nodeBuffer, scene->metaballs.size() * pixelcount * sizeof(LLNode));
-	cudaMemset(dev_nodeBuffer, -1, scene->metaballs.size() * pixelcount * sizeof(LLNode));
+	cudaMalloc(&dev_nodeBuffer, MAXLISTSIZE * pixelcount * sizeof(LLNode));
+	cudaMemset(dev_nodeBuffer, -1, MAXLISTSIZE * pixelcount * sizeof(LLNode));
 
 	cudaMalloc(&dev_LLcounter, sizeof(int));
 	cudaMemset(dev_LLcounter, 0, sizeof(int));
@@ -194,18 +194,22 @@ void generateLinkedList(
 	int num_balls, 
 	int * LLcounter,
 	int * headPtrBuffer,
-	LLNode * nodeBuffer)
+	LLNode * nodeBuffer,
+	int iter)
 {
 	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
 
 	if (path_index < num_paths) {
 		PathSegment pathSegment = pathSegments[path_index];
+		glm::vec3 intersect_point;
+		glm::vec3 normal;
+		bool outside = true;
 		for (int i = 0; i < num_balls; i++) {
 			Metaball & ball = metaballs[i];
-			float t = rayMarchTest(ball, iter, pathSegment.ray);
+			float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
 			if (t > 0.0f) {
 				int count = atomicAdd(LLcounter, 1); // returns before add
-				LLNode &node = nodeBuffer[path_index];
+				LLNode &node = nodeBuffer[count];
 				node.metaballid = i;
 				node.next = headPtrBuffer[path_index];
 				headPtrBuffer[path_index] = count;
@@ -236,22 +240,11 @@ void computeIntersections(
 	{
 		PathSegment pathSegment = pathSegments[path_index];
 
-		// intersection data to be set
-		float t;
-		glm::vec3 intersect_point;
-		glm::vec3 normal;
-		float t_min = FLT_MAX;
-		int hit_geom_index = -1;
-		bool outside = true;
-
-		glm::vec3 tmp_intersect;
-		glm::vec3 tmp_normal;
-
 		// break if no intersections
 		int first_node_idx = headPtrBuffer[path_index];
 		if (first_node_idx < 0) {
 			intersections[path_index].t = -1.0f;
-			break;
+			return;
 		}
 		
 		// find first positive influence
@@ -259,7 +252,7 @@ void computeIntersections(
 		float s;
 		glm::vec3 x;
 		int node_idx = first_node_idx;
-		while (node_idx > 0) {
+		while (node_idx >= 0) {
 			// calculate influence
 			s = glm::dot(pathSegment.ray.direction, metaballs[nodeBuffer[node_idx].metaballid].translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
@@ -268,6 +261,7 @@ void computeIntersections(
 			if (density > 0) {
 				break;
 			}
+			node_idx = nodeBuffer[node_idx].next;
 		}
 
 		// Secant method (root finding)
@@ -295,9 +289,7 @@ void computeIntersections(
 			steps++;
 		}
 
-		normal = calculateNormals(num_balls, metaballs, x2);
 		glm::vec3 color_test = calculateColor(num_balls, metaballs, x2);
-		final_t = (node_idx > 0) ? t2 : -1.f;
 
 		// TODO dichotomic method
 
@@ -305,7 +297,7 @@ void computeIntersections(
 
 		//The ray hits something
 		//intersections[path_index].t = t_min;
-		intersections[path_index].t = final_t;
+		intersections[path_index].t = (node_idx > 0) ? t2 : -1.f;
 
 		intersections[path_index].debug = color_test;
 #if SECANTSTEPDEBUG
@@ -317,7 +309,7 @@ void computeIntersections(
 		//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 		intersections[path_index].materialId = 0; // TODO
 		intersections[path_index].wo = pathSegment.ray.direction;
-		intersections[path_index].surfaceNormal = normal;
+		intersections[path_index].surfaceNormal = calculateNormals(num_balls, metaballs, x2);
 	}
 }
 
@@ -478,6 +470,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
 
+	dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
+
 	// move metaballs
 	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
 	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
@@ -490,17 +484,19 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 
 	// sort metaballs based on distance from camera
 	// so when added to linked list, already in order
-	thrust::sort_by_key(thrust::seq, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs, thrust::greater<float>());
+	thrust::sort_by_key(thrust::device, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs, thrust::greater<float>());
 	checkCUDAError("sort metaball distance");
 	cudaDeviceSynchronize();
 
 	// Concurrent Linked List Construction
 	// head pointer buffer contains index into node buffer for each path
 	// of closest metaball from camera (since previous sort descending)
+	cudaMemset(dev_LLcounter, 0, sizeof(int));
+	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
 	generateLinkedList<<<numblocksPathSegmentTracing, blockSize1d>>>(
 		dev_paths, num_paths, 
 		dev_metaballs, hst_scene->metaballs.size(), 
-		dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer);
+		dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer, iter);
 	checkCUDAError("generate Linked List");
 	cudaDeviceSynchronize();
 
@@ -510,8 +506,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 
 		// clean shading chunks
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
-
-		dim3 numblocksPathSegmentTracing = (num_paths + blockSize1d - 1) / blockSize1d;
 
 #if !BVH
 		// tracing
@@ -577,9 +571,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
 
-	printf("Iteration Done\n");
 	endCpuTimer();
-	printTime();
+	printAvgCPUTime(100);
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
