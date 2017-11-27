@@ -33,6 +33,7 @@ struct Metaball {
 	float radius;
 	glm::vec3 translation;
 	glm::vec3 velocity;
+	int bvh_id;
 };
 
 struct LLNode {

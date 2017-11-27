@@ -20,6 +20,18 @@
 #define THRESHOLD 0.2
 #define MAXSECANTSTEPS 30
 
+__device__ glm::vec3 indexToColor(int i, int max) {
+	int comp_range = max / 3;
+	int z = i % (comp_range);
+	int y = (i / z ) % (comp_range);
+	int x = i / (y*z);
+	return glm::vec3((float)x / (float)comp_range, (float)y / (float)comp_range, (float)z / (float)comp_range);
+}
+
+__device__ bool metaBallsOverlap(Metaball & a, Metaball & b) {
+	return glm::distance(a.translation, b.translation) < (a.radius + b.radius);
+}
+
 //METABALL FUNCTIONS
 __device__ float calculateDensity(Metaball * metaballs, int first_node_idx, LLNode * nodeBuffer, glm::vec3 x) {
 	float density = 0.f;
@@ -132,6 +144,14 @@ struct sum_sa {
 	}
 };
 
+struct set_bvh_id {
+	set_bvh_id(int id) : id(id) {}
+	__host__ __device__ void operator()(Metaball & ball) const { ball.bvh_id = id; }
+
+private:
+	int id;
+};
+
 void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVHNodes, Scene * hst_scene) {
 	int num_BVHnodes = (1 << (bvh_depth + 1)) - 1;
 	int num_geoms = hst_scene->metaballs.size();
@@ -223,6 +243,7 @@ void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVH
 				BVHnodes[l_idx].minB = lminb;
 				BVHnodes[r_idx].maxB = rmaxb;
 				BVHnodes[r_idx].minB = rminb;
+
 				BVHnodes[curr_bvh].isLeaf = false;
 				BVHnodes[curr_bvh].child1id = l_idx;
 				BVHnodes[curr_bvh].child2id = r_idx;
