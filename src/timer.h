@@ -19,6 +19,9 @@ bool gpu_timer_started = false;
 float prev_elapsed_time_cpu_milliseconds = 0.f;
 float prev_elapsed_time_gpu_milliseconds = 0.f;
 
+float total_elapsed_time_cpu_milliseconds = 0.f;
+float total_started_times = 0.f;
+
 void startCpuTimer() {
 	if (cpuTimerStarted) {
 		throw std::runtime_error("CPU timer already started");
@@ -26,6 +29,7 @@ void startCpuTimer() {
 
 	cpuTimerStarted = true;
 	time_start_cpu = std::chrono::high_resolution_clock::now();
+	total_started_times++;
 }
 
 void endCpuTimer() {
@@ -39,6 +43,7 @@ void endCpuTimer() {
 	prev_elapsed_time_cpu_milliseconds = static_cast<decltype(prev_elapsed_time_cpu_milliseconds)>(duration.count());
 
 	cpuTimerStarted = false;
+	total_elapsed_time_cpu_milliseconds += prev_elapsed_time_cpu_milliseconds;
 }
 
 void startGpuTimer()
@@ -60,8 +65,16 @@ void endGpuTimer()
 	gpu_timer_started = false;
 }
 
-void printTime() {
+void printCPUTime() {
 	printf("Time Elapsed: %f milliseconds\n", prev_elapsed_time_cpu_milliseconds);
+}
+
+void printAvgCPUTime(int ith) {
+	if (static_cast<int>(total_started_times)%ith == 0) {
+		if (total_started_times > 0.f) printf("Average Time Elapsed: %f milliseconds\n", total_elapsed_time_cpu_milliseconds / total_started_times);
+		total_started_times = 0.f;
+		total_elapsed_time_cpu_milliseconds = 0.f;
+	}
 }
 
 void printGPUTime() {

@@ -36,6 +36,11 @@ struct Metaball {
 	int bvh_id;
 };
 
+struct LLNode {
+	int metaballid;
+	int next;
+};
+
 struct BVHNode {
 	glm::vec3 minB;
 	glm::vec3 maxB;
