@@ -573,6 +573,10 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 
 	endCpuTimer();
 	printAvgCPUTime(100);
+	// what is counter? is it ever greater than size of dev_nodeBuffer
+	int count;
+	cudaMemcpy(&count, dev_LLcounter, sizeof(int), cudaMemcpyDeviceToHost);
+	printf("LLcount: %i\n", count);
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
