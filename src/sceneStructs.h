@@ -36,6 +36,11 @@ struct Metaball {
 	int bvh_id;
 };
 
+struct BBox {
+	glm::vec3 maxB;
+	glm::vec3 minB;
+};
+
 struct LLNode {
 	int metaballid;
 	int next;
@@ -44,10 +49,10 @@ struct LLNode {
 struct BVHNode {
 	glm::vec3 minB;
 	glm::vec3 maxB;
+	BBox Bbox;
 	int startM;
 	int endM;
-	int startS;
-	int endS;
+	int numSplitBalls;
 	bool isLeaf = true;
 	int id;
 	int child1id;

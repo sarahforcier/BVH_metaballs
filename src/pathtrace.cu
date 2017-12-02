@@ -19,8 +19,10 @@
 
 #define ERRORCHECK 1
 
-#define BVH 0
-#define MAX_BVH_DEPTH 5
+#define BVH 1
+#define MAX_BVH_DEPTH 2
+#define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
+#define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
 #define MAXLISTSIZE 500
@@ -89,17 +91,22 @@ static PathSegment * dev_paths = NULL;
 static ShadeableIntersection * dev_intersections = NULL;
 
 static Metaball * dev_metaballs = NULL;
+static Metaball * dev_splitMetaballs = NULL;
 static float * dev_ballDist = NULL;
 static int * dev_LLcounter = NULL;
 static int * dev_headPtrBuffer = NULL;
 static LLNode * dev_nodeBuffer = NULL;
 static BVHNode * dev_bvhTree = NULL;
 
+Metaball * metaballsCPU = NULL;
+
 void pathtraceInit(Scene *scene) 
 {
     hst_scene = scene;
     const Camera &cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
+
+	metaballsCPU = new Metaball[hst_scene->metaballs.size()];
 
     cudaMalloc(&dev_image, pixelcount * sizeof(glm::vec3));
     cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
@@ -134,11 +141,17 @@ void pathtraceInit(Scene *scene)
 	// initialize for Split BVH
 	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode));
 
+	//splitmetaballs
+
+	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * scene->metaballs.size() * sizeof(Metaball));
+
     checkCUDAError("pathtraceInit");
 }
 
 void pathtraceFree() 
 {
+	delete metaballsCPU;
+
     cudaFree(dev_image);  // no-op if dev_image is null
   	cudaFree(dev_paths);
   	cudaFree(dev_geoms);
@@ -151,6 +164,7 @@ void pathtraceFree()
 	cudaFree(dev_headPtrBuffer);
 	cudaFree(dev_nodeBuffer);
 	cudaFree(dev_bvhTree);
+	cudaFree(dev_splitMetaballs);
     checkCUDAError("pathtraceFree");
 }
 
@@ -482,11 +496,35 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	checkCUDAError("ball distance computation");
 	cudaDeviceSynchronize();
 
+
 	// sort metaballs based on distance from camera
 	// so when added to linked list, already in order
 	thrust::sort_by_key(thrust::device, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs, thrust::greater<float>());
 	checkCUDAError("sort metaball distance");
 	cudaDeviceSynchronize();
+
+#if BVH
+	startCpuTimer();
+	cudaMemcpy(metaballsCPU, dev_metaballs, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToHost);
+
+	int num_bvh_nodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
+	int num_bvh_leaves = (1 << MAX_BVH_DEPTH);
+	std::vector<BVHNode> BVHnodes;
+	BVHnodes.resize(NUM_BVH_NODES);
+	std::vector<Metaball> allSplitBalls;
+	allSplitBalls.resize(hst_scene->metaballs.size() * num_bvh_leaves);
+	constructBVHTree(MAX_BVH_DEPTH, metaballsCPU, BVHnodes, allSplitBalls, hst_scene);
+	cudaMemcpy(dev_metaballs, metaballsCPU, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_bvhTree, BVHnodes.data(),  num_bvh_nodes* sizeof(BVHNode), cudaMemcpyHostToDevice);
+	checkCUDAError("bvh error");
+	cudaDeviceSynchronize();
+	cudaMemcpy(dev_splitMetaballs, allSplitBalls.data(), hst_scene->metaballs.size() * num_bvh_leaves * sizeof(Metaball), cudaMemcpyHostToDevice);
+	checkCUDAError("splitmetaballs error");
+	cudaDeviceSynchronize();
+	endCpuTimer();
+	printf("memcpy\n");
+	printCPUTime();
+#endif
 
 	// Concurrent Linked List Construction
 	// head pointer buffer contains index into node buffer for each path
@@ -499,6 +537,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer, iter);
 	checkCUDAError("generate Linked List");
 	cudaDeviceSynchronize();
+
+
+	//printf("metaball %f\n", metaballsCPU[hst_scene->metaballs.size() - 1].translation.x);
 
 	bool iterationComplete = false;
 	startCpuTimer();
@@ -522,30 +563,20 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 
 #else 
 
-		constructBVHTree(MAX_BVH_DEPTH, dev_metaballs, dev_bvhTree, hst_scene);
-
 		int num_BVHnodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
 		dim3 numblocksBVH = (num_BVHnodes + blockSize1d - 1) / blockSize1d;
 
 		kernSetBVHTransform << < numblocksBVH, blockSize1d >> > (num_BVHnodes, dev_bvhTree);
-
 		checkCUDAError("setBVHTransform");
 		cudaDeviceSynchronize();
 
-		computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
-			depth
-			, num_paths
-			, dev_paths
-			, dev_intersections
-			, dev_bvhTree
-			, num_BVHnodes
-			, dev_geoms
-			, dev_metaballs
-			, hst_scene->metaballs.size()
-			, dev_ballHits
-			, dev_ballDist
-			, iter
-			);
+		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+			depth,
+			dev_paths, num_paths,
+			dev_geoms, hst_scene->geoms.size(),
+			dev_intersections,
+			dev_metaballs, hst_scene->metaballs.size(),
+			dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer);
 		checkCUDAError("compute Intersection with BVH");
 		cudaDeviceSynchronize();
 		depth++;
@@ -570,9 +601,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 			);
 		iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
-
 	endCpuTimer();
-	printAvgCPUTime(100);
+	printf("the rest\n \n");
+	printCPUTime();
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;

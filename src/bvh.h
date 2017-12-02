@@ -152,7 +152,7 @@ private:
 	int id;
 };
 
-void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVHNodes, Scene * hst_scene) {
+void constructBVHTreeBasic(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVHNodes, Scene * hst_scene) {
 	int num_BVHnodes = (1 << (bvh_depth + 1)) - 1;
 	int num_geoms = hst_scene->metaballs.size();
 	//std::vector<int> BVHstart;
@@ -270,16 +270,233 @@ void constructBVHTree(int bvh_depth, Metaball * dev_metaballs, BVHNode * dev_BVH
 
 }
 
+bool metaballIntersectsBBox(Metaball ball, BBox bbox) {
+	float R = ball.radius;
+	glm::vec3 S = ball.translation;
+	glm::vec3 C1 = bbox.minB;
+	glm::vec3 C2 = bbox.maxB;
+	float dist_squared = R * R;
+	/* assume C1 and C2 are element-wise sorted, if not, do that now */
+	if (S.x < C1.x) dist_squared -= (S.x - C1.x) * (S.x - C1.x);
+	else if (S.x > C2.x) dist_squared -= (S.x - C2.x) * (S.x - C2.x);
+	if (S.y < C1.y) dist_squared -= (S.y - C1.y) * (S.y - C1.y);
+	else if (S.y > C2.y) dist_squared -= (S.y - C2.y) * (S.y - C2.y);
+	if (S.z < C1.z) dist_squared -= (S.z - C1.z) * (S.z - C1.z);
+	else if (S.z > C2.z) dist_squared -= (S.z - C2.z) * (S.z - C2.z);
+	return dist_squared > 0.f;
+}
+
+void BBoxSplitbyPlane(BBox bbox, BBox & lBBox, BBox & rBBox, int axis, int val) {
+	lBBox = bbox;
+	rBBox = bbox;
+	lBBox.maxB[axis] = val;
+	rBBox.minB[axis] = val;
+}
+
+void BBoxMetaballUnion(BBox & bbox, const Metaball ball) {
+
+	glm::vec3 umax;
+	glm::vec3 umin;
+	glm::vec3 g1 = bbox.maxB;
+	glm::vec3 g2 = ball.translation + glm::vec3(ball.radius);
+	g1.x > g2.x ? bbox.maxB.x = g1.x : bbox.maxB.x = g2.x;
+	g1.y > g2.y ? bbox.maxB.y = g1.y : bbox.maxB.y = g2.y;
+	g1.z > g2.z ? bbox.maxB.z = g1.z : bbox.maxB.z = g2.z;
+
+	g1 = bbox.minB;
+	g2 = ball.translation - glm::vec3(ball.radius);
+	g1.x < g2.x ? bbox.minB.x = g1.x : bbox.minB.x = g2.x;
+	g1.y < g2.y ? bbox.minB.y = g1.y : bbox.minB.y = g2.y;
+	g1.z < g2.z ? bbox.minB.z = g1.z : bbox.minB.z = g2.z;
+
+}
+
+BBox BBoxIntersection(BBox b1, BBox b2) {
+	glm::vec3 retmax;
+	glm::vec3 retmin;
+	glm::vec3 g1 = b1.minB;
+	glm::vec3 g2 = b2.minB;
+	g1.x > g2.x ? retmin.x = g1.x : retmin.x = g2.x;
+	g1.y > g2.y ? retmin.y = g1.y : retmin.y = g2.y;
+	g1.z > g2.z ? retmin.z = g1.z : retmin.z = g2.z;
+
+	g1 = b1.maxB;
+	g2 = b2.maxB;
+	g1.x < g2.x ? retmax.x = g1.x : retmax.x = g2.x;
+	g1.y < g2.y ? retmax.y = g1.y : retmax.y = g2.y;
+	g1.z < g2.z ? retmax.z = g1.z : retmax.z = g2.z;
+	BBox retBBox;
+	retBBox.maxB = retmax;
+	retBBox.minB = retmin;
+	return retBBox;
+}
+
+void printBBoxInfo(BBox bbox, char * str) {
+	glm::vec3 maxb = bbox.maxB;
+	glm::vec3 minb = bbox.minB;
+	printf(str);
+	printf("max %f %f %f\n", maxb[0], maxb[1], maxb[2]);
+	printf("min %f %f %f\n", minb[0], minb[1], minb[2]);
+}
+
+BBox calculateMetaballBBox(Metaball* metaballs, int num_metaballs) {
+	glm::vec3 maxB = thrust::transform_reduce(thrust::host, metaballs, metaballs + num_metaballs, get_maxb(), glm::vec3(-1.0f*INFINITY), get_max_vec());
+	glm::vec3 minB = thrust::transform_reduce(thrust::host, metaballs, metaballs + num_metaballs, get_minb(), glm::vec3(1.0f*INFINITY), get_min_vec());
+	BBox bbox;
+	bbox.maxB = maxB;
+	bbox.minB = minB;
+	return bbox;
+}
+
+void buildBVHNode(int depth, 
+				int max_depth, 
+				int axis,
+				int bvh_idx, 
+				std::vector<BVHNode> & BVHNodes, 
+				BBox bbox,
+				Metaball * metaballs,
+				int start_idx,
+				int num_metaballs,
+				int max_num_split_balls,
+				std::vector<Metaball> & splitBalls,
+				std::vector<Metaball> & leafSplitBalls) {
+
+	// Find the best splitting plane s
+	// for all metaballs in metaballs to metaballs + num_metaballs
+	// distribute to left or right child node
+
+	printf("bvh idx %i, num balls %i \n", bvh_idx, num_metaballs);
+
+	if (depth == max_depth || num_metaballs <= 1) {
+		BVHNodes[bvh_idx].isLeaf = true;
+		//TAKE CARE OF THROWING SPLIT NODES
+		int depth_offset = (1 << (depth)) - 1;
+		depth++;
+		int row_idx = bvh_idx - depth_offset;
+		int leaf_offset = row_idx * max_num_split_balls;
+		for (int i = 0; i < splitBalls.size(); i++) {
+			leafSplitBalls[leaf_offset + i] = splitBalls[i];
+		}
+		return;
+	}
+
+	// TEMPORARY TEST VAL
+	float val = bbox.minB[axis] + (bbox.maxB[axis] - bbox.minB[axis]) / 2.0f ;
+
+	Metaball* end = thrust::partition(thrust::host, metaballs, metaballs + num_metaballs, less_than_axis(axis, val));
+	printf("partition idx %i %f %i\n", axis, val, end - metaballs);
+
+	// assume "left" child is < than "val" in "axis"
+
+	int rmetaballs_start = end - metaballs;
+	BBox lMetaballBbox = calculateMetaballBBox(metaballs, end - metaballs);
+	BBox rMetaballBbox = calculateMetaballBBox(end, num_metaballs - (rmetaballs_start));
+
+	BBox lChildBBox;
+	BBox rChildBBox;
+	BBoxSplitbyPlane(bbox, lChildBBox, rChildBBox, axis, val);
+	std::vector<Metaball> lSplitBalls;
+	std::vector<Metaball> rSplitBalls;
+
+	// LEFT SIDE
+	// for each ball in splitBalls and rChildMetaballs
+	for (int i = rmetaballs_start; i < num_metaballs; i++) {
+		// if ball overlaps lChildBbox
+		if (metaballIntersectsBBox(metaballs[i], lChildBBox)) {
+			// add ball to lSplitBalls
+			lSplitBalls.push_back(metaballs[i]);
+			// left mBallBbox U bbox(ball)
+			BBoxMetaballUnion(lMetaballBbox, metaballs[i]);
+		}
+	}
+	for (int i = 0; i < splitBalls.size(); i++) {
+		if (metaballIntersectsBBox(splitBalls[i], lChildBBox)) {
+			lSplitBalls.push_back(splitBalls[i]);
+			BBoxMetaballUnion(lMetaballBbox, metaballs[i]);
+		}
+	}
+	// lChildBbox <- intersection of lChildBbox and lBallBbox
+	lChildBBox = BBoxIntersection(lMetaballBbox, lChildBBox);
+
+	// DO SAME FOR RIGHT SIDE
+	for (int i = 0; i < rmetaballs_start - 1; i++) {
+		// if ball overlaps lChildBbox
+		if (metaballIntersectsBBox(metaballs[i], rChildBBox)) {
+			// add ball to lSplitBalls
+			rSplitBalls.push_back(metaballs[i]);
+			// left mBallBbox U bbox(ball)
+			BBoxMetaballUnion(rMetaballBbox, metaballs[i]);
+		}
+	}
+	for (int i = 0; i < splitBalls.size(); i++) {
+		if (metaballIntersectsBBox(splitBalls[i], rChildBBox)) {
+			rSplitBalls.push_back(splitBalls[i]);
+			BBoxMetaballUnion(rMetaballBbox, metaballs[i]);
+		}
+	}
+
+	// rChildBbox <- intersection of rChildBbox and rBallBbox
+	rChildBBox = BBoxIntersection(rMetaballBbox, rChildBBox);
+
+	int depth_offset = (1 << (depth)) - 1;
+	depth++;
+	int row_idx = bvh_idx - depth_offset;
+	int child_depth_offset = (1 << (depth)) - 1;
+
+	BVHNode lChild;
+	BVHNode rChild;
+	lChild.id = child_depth_offset + (2 * row_idx);
+	rChild.id = child_depth_offset + (2 * row_idx) + 1;
+	lChild.Bbox = lChildBBox;
+	rChild.Bbox = rChildBBox;
+	lChild.startM = start_idx;
+	lChild.endM = start_idx + rmetaballs_start - 1;
+	rChild.startM = start_idx + rmetaballs_start;
+	rChild.endM = start_idx + num_metaballs - 1;
+	lChild.numSplitBalls = lSplitBalls.size();
+	rChild.numSplitBalls = rSplitBalls.size();
+	BVHNodes[lChild.id] = lChild;
+	BVHNodes[rChild.id] = rChild;
+	BVHNodes[bvh_idx].isLeaf = false;
+	BVHNodes[bvh_idx].child1id = lChild.id;
+	BVHNodes[bvh_idx].child2id = rChild.id;
+	axis = (axis + 1) % 3;
+
+	//recurse left side
+	buildBVHNode(depth, max_depth, axis, lChild.id, BVHNodes, lChildBBox, 
+		metaballs, start_idx, rmetaballs_start, max_num_split_balls, lSplitBalls, leafSplitBalls);
+	//recurse right side
+	buildBVHNode(depth, max_depth, axis, rChild.id, BVHNodes, rChildBBox, 
+		end, start_idx + rmetaballs_start, num_metaballs - (rmetaballs_start), max_num_split_balls, rSplitBalls, leafSplitBalls);
+}
+
+void constructBVHTree(int bvh_depth, Metaball * metaballs, std::vector<BVHNode> & BVHnodes, std::vector<Metaball> & allSplitBalls, Scene * hst_scene) {
+	int num_BVHnodes = (1 << (bvh_depth + 1)) - 1;
+	int num_geoms = hst_scene->metaballs.size();
+
+	std::vector<Metaball> splitBalls;
+
+	BVHnodes[0] = BVHNode();
+	BVHnodes[0].startM = 0;
+	BVHnodes[0].endM = num_geoms;
+
+	BBox bbox = calculateMetaballBBox(metaballs, num_geoms);
+	buildBVHNode(0, bvh_depth, 0, 0, BVHnodes, bbox , metaballs, 0, num_geoms, num_geoms, splitBalls,allSplitBalls);
+	//printf("partition test %i %i \n", num_geoms, end - metaballs);
+
+	
+}
+
 __global__ void kernSetBVHTransform(int n, BVHNode * BVHnodes) {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
 	//printf("%i \n", idx);
-	if (idx > n) {
+	if (idx >= n) {
 		return;
 	}
 	BVHNode & node = BVHnodes[idx];
 	//printf("node: %i %f %f\n", idx, node.minB.x ,node.maxB.x);
-	glm::vec3 translate = (node.maxB + node.minB) / 2.0f;
-	glm::vec3 scale = (node.maxB - node.minB);
+	glm::vec3 translate = (node.Bbox.maxB + node.Bbox.minB) / 2.0f;
+	glm::vec3 scale = (node.Bbox.maxB - node.Bbox.minB);
 	node.transform = dev_buildTransformationMatrix(
 		translate, glm::vec3(0.0f), scale);
 	node.inverseTransform = glm::inverse(node.transform);
