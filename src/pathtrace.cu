@@ -87,6 +87,7 @@ static Scene * hst_scene = NULL;
 static glm::vec3 * dev_image = NULL;
 static Geom * dev_geoms = NULL;
 static Material * dev_materials = NULL;
+static Texture * dev_environment = NULL;
 static PathSegment * dev_paths = NULL;
 static ShadeableIntersection * dev_intersections = NULL;
 
@@ -119,17 +120,23 @@ void pathtraceInit(Scene *scene)
   	cudaMalloc(&dev_materials, scene->materials.size() * sizeof(Material));
   	cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
+  	if (scene->environmentMap.size() > 0) {
+  		cudaMalloc(&(scene->environmentMap[0].dev_data), scene->environmentMap.imagesize * sizeof(float)); // environment map image
+  		cudaMemcpy(scene->environmentMap[0].dev_data, scene->environmentMap[0].host_data, scene->environmentMap.imagesize * sizeof(float), cudaMemcpyHostToDevice);
+
+  		cudaMalloc(&dev_environment, sizeof(Texture)); // environment map struct
+  		cudaMemcpy(dev_environment, scene->environmentMap.data(), sizeof(Texture), cudaMemcpyHostToDevice);
+  	}
+  	
   	cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
   	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
-    // metaball memory
-	cudaMalloc(&dev_metaballs, scene->metaballs.size() * sizeof(Metaball));
+	cudaMalloc(&dev_metaballs, scene->metaballs.size() * sizeof(Metaball)); // metaball memory
 	cudaMemcpy(dev_metaballs, scene->metaballs.data(), scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
 
 	cudaMalloc(&dev_ballDist, scene->metaballs.size() * sizeof(float)); 
 
-	// initialize Linked List
-	cudaMalloc(&dev_headPtrBuffer, pixelcount * sizeof(int));
+	cudaMalloc(&dev_headPtrBuffer, pixelcount * sizeof(int)); // initialize Linked List
 	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
 
 	cudaMalloc(&dev_nodeBuffer, MAXLISTSIZE * pixelcount * sizeof(LLNode));
@@ -137,13 +144,10 @@ void pathtraceInit(Scene *scene)
 
 	cudaMalloc(&dev_LLcounter, sizeof(int));
 	cudaMemset(dev_LLcounter, 0, sizeof(int));
+	
+	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode)); // initialize for Split BVH
 
-	// initialize for Split BVH
-	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode));
-
-	//splitmetaballs
-
-	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * scene->metaballs.size() * sizeof(Metaball));
+	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * scene->metaballs.size() * sizeof(Metaball)); //splitmetaballs
 
     checkCUDAError("pathtraceInit");
 }
@@ -156,6 +160,7 @@ void pathtraceFree()
   	cudaFree(dev_paths);
   	cudaFree(dev_geoms);
   	cudaFree(dev_materials);
+  	cudaFree(dev_environment); 
   	cudaFree(dev_intersections);
 
 	cudaFree(dev_metaballs);
@@ -421,11 +426,11 @@ void shadeMetaballs(
 	int iter, int num_paths,
 	ShadeableIntersection * shadeableIntersections,
 	PathSegment * pathSegments,
-	Material * materials)
+	Material * materials,
+	Texture * environment)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < num_paths)
-	{
+	if (idx < num_paths) {
 		ShadeableIntersection intersection = shadeableIntersections[idx];
 		if (intersection.t > 0.0f) { // if the intersection exists...
 
@@ -439,9 +444,13 @@ void shadeMetaballs(
 			//pathSegments[idx].color = intersection.debug;
 #endif
 			//pathSegments[idx].color = camdir;
-		}
-		else {
-			pathSegments[idx].color = glm::vec3(0.1f);
+		} else {
+
+			if (environment_img) {
+				pathSegments[idx].color = environment(pathSegment.ray.direction);
+			} else {
+				pathSegments[idx].color = glm::vec3(0.f);
+			}
 		}
 	}
 }
@@ -463,7 +472,8 @@ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterationPaths)
  * Wrapper for the __global__ call that sets up the kernel calls and does a ton
  * of memory management
  */
-void pathtrace(uchar4 *pbo, int frame, int iter) {
+void pathtrace(uchar4 *pbo, int frame, int iter) 
+{
     const int traceDepth = hst_scene->state.traceDepth;
     const Camera &cam = hst_scene->state.camera;
     const int pixelcount = cam.resolution.x * cam.resolution.y;
@@ -495,7 +505,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	computeBallDist << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), hst_scene->state.camera.position, dev_metaballs, dev_ballDist);
 	checkCUDAError("ball distance computation");
 	cudaDeviceSynchronize();
-
 
 	// sort metaballs based on distance from camera
 	// so when added to linked list, already in order
@@ -597,7 +606,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 			num_paths,
 			dev_intersections,
 			dev_paths,
-			dev_materials
+			dev_materials,
+			dev_environment
 			);
 		iterationComplete = true; // TODO: should be based off stream compaction results.
 	}

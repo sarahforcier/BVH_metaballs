@@ -6,6 +6,8 @@
 #include "glm/glm.hpp"
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
+#define PI 3.14159265358979323846f
+#define TWO_PI 6.28318530717958647692f
 
 enum GeomType {
     SPHERE,
@@ -73,6 +75,44 @@ struct Material {
     float indexOfRefraction;
     float emittance;
 };
+
+struct Texture {
+    int width;
+    int height;
+    int imagesize;
+    float * host_data;
+    float * dev_data;
+
+    // see ../external/include/stb_image.h for usage
+    Texture(int w, int h, char const *file) : width(w), height(h) {
+        imagesize = width * height * 3;
+        host_data = stbi_loadf(filename, &width, &height, 3, 0); // 3 components per pixel
+        if (host_data == NULL) {
+                std::cout << "Error Loading Texture" << std::endl;
+        }
+        dev_data = NULL;
+    }
+
+    ~Texture() {
+        stbi_image_free(host_data);
+        cudaFree(dev_data);
+    }
+
+    // get pixel value from spherical direction
+    __host__ __device__
+    glm::vec3 operator()(glm::vec3& w) 
+    {   
+        float phi = std::atan2(w.z, w.x);
+        float u = Inv2Pi * (phi < 0.f ? (phi + TWO_PI) : phi);
+        float v = 1.f - InvPi * std::acos(w.y);
+        
+        int x = glm::min((float)width * u, (float)width - 1.f);
+        int y = glm::min((float)height * (1.f - v), (float)height - 1.f);
+
+        int index = y * width + x;
+        return glm::vec3(dev_data[index * 3], dev_data[index * 3 + 1], dev_data[index * 3 + 2]);
+    }
+}
 
 struct Camera {
     glm::ivec2 resolution;

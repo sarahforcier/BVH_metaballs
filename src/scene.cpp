@@ -4,7 +4,6 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-
 #define NUM_METABALLS_SQRT 5
 
 Scene::Scene(string filename) {
@@ -21,7 +20,13 @@ Scene::Scene(string filename) {
         utilityCore::safeGetline(fp_in, line);
         if (!line.empty()) {
             vector<string> tokens = utilityCore::tokenizeString(line);
-            if (strcmp(tokens[0].c_str(), "MATERIAL") == 0) {
+            if (strcmp(tokens[0].c_str(), "METABALLS") == 0) {
+                loadMetaballs(NUM_METABALLS_SQRT);
+                cout << " " << endl;
+            } else if (strcmp(tokens[0].c_str(), "ENVIRONMENT") == 0) {
+                loadEnvironment();
+                cout << " " << endl;
+            } else if (strcmp(tokens[0].c_str(), "MATERIAL") == 0) {
                 loadMaterial(tokens[1]);
                 cout << " " << endl;
             } else if (strcmp(tokens[0].c_str(), "OBJECT") == 0) {
@@ -30,10 +35,9 @@ Scene::Scene(string filename) {
             } else if (strcmp(tokens[0].c_str(), "CAMERA") == 0) {
                 loadCamera();
                 cout << " " << endl;
-            }
+            } 
         }
     }
-	loadMetaballs(NUM_METABALLS_SQRT);
 }
 
 int Scene::loadGeom(string objectid) {
@@ -95,7 +99,7 @@ int Scene::loadGeom(string objectid) {
 
 int Scene::loadMetaballs(int num) 
 {
-	
+	cout << "Loading " << (num*num*num) << "Metaballs ..." << endl;
 	float step = 10.f / num;
 	int half_num = num / 2;
 	for (int i = -half_num; i < half_num; ++i) {
@@ -212,5 +216,31 @@ int Scene::loadMaterial(string materialid) {
         }
         materials.push_back(newMaterial);
         return 1;
+    }
+}
+
+int Scene::loadEnvironment() {
+    cout << "Loading Environment Map ..." << endl;
+
+    string line;
+    utilityCore::safeGetline(fp_in, line);
+    vector<string> tokens = utilityCore::tokenizeString(line);
+    int width = 0;
+    int height = 0;
+    char * filename = nullptr;
+    for (int i = 0; i < 2; ++i) {
+        if (strcmp(tokens[0].c_str(), "RES") == 0) {
+            width = atoi(tokens[1].c_str());
+            height = atoi(tokens[2].c_str());
+        } else if (strcmp(tokens[0].c_str(), "IMG") == 0) {
+            data = tokens[1].c_str();
+        }
+    }
+    if (width > 0 && height > 0 && filename) {
+        environmentMap.push_back(Texture(width, height, data));
+        return 1;
+    } else {
+        cout << "Error Loading Environment" << endl;
+        return -1;
     }
 }
