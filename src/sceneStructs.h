@@ -3,11 +3,11 @@
 #include <string>
 #include <vector>
 #include <cuda_runtime.h>
+#include "stb_image.h"
 #include "glm/glm.hpp"
+#include "utilities.h"
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
-#define PI 3.14159265358979323846f
-#define TWO_PI 6.28318530717958647692f
 
 enum GeomType {
     SPHERE,
@@ -85,26 +85,22 @@ struct Texture {
 
     // see ../external/include/stb_image.h for usage
     Texture(int w, int h, char const *file) : width(w), height(h) {
-        imagesize = width * height * 3;
-        host_data = stbi_loadf(filename, &width, &height, 3, 0); // 3 components per pixel
-        if (host_data == NULL) {
-                std::cout << "Error Loading Texture" << std::endl;
-        }
+		int comp = 3;
+		imagesize = width * height * comp;
+        host_data = stbi_loadf(file, &width, &height, &comp, 0); // 3 components per pixel
         dev_data = NULL;
     }
 
     ~Texture() {
         stbi_image_free(host_data);
-        cudaFree(dev_data);
     }
 
     // get pixel value from spherical direction
     __host__ __device__
-    glm::vec3 operator()(glm::vec3& w) 
-    {   
+    glm::vec3 getColor(glm::vec3& w) {   
         float phi = std::atan2(w.z, w.x);
-        float u = Inv2Pi * (phi < 0.f ? (phi + TWO_PI) : phi);
-        float v = 1.f - InvPi * std::acos(w.y);
+        float u = (phi < 0.f ? (phi + TWO_PI) : phi) / TWO_PI;
+        float v = 1.f - std::acos(w.y) / PI;
         
         int x = glm::min((float)width * u, (float)width - 1.f);
         int y = glm::min((float)height * (1.f - v), (float)height - 1.f);
@@ -112,7 +108,7 @@ struct Texture {
         int index = y * width + x;
         return glm::vec3(dev_data[index * 3], dev_data[index * 3 + 1], dev_data[index * 3 + 2]);
     }
-}
+};
 
 struct Camera {
     glm::ivec2 resolution;

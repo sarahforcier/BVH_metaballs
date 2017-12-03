@@ -99,7 +99,7 @@ int Scene::loadGeom(string objectid) {
 
 int Scene::loadMetaballs(int num) 
 {
-	cout << "Loading " << (num*num*num) << "Metaballs ..." << endl;
+	cout << "Loading " << (num*num*num) << " Metaballs ..." << endl;
 	float step = 10.f / num;
 	int half_num = num / 2;
 	for (int i = -half_num; i < half_num; ++i) {
@@ -221,23 +221,24 @@ int Scene::loadMaterial(string materialid) {
 
 int Scene::loadEnvironment() {
     cout << "Loading Environment Map ..." << endl;
-
-    string line;
-    utilityCore::safeGetline(fp_in, line);
-    vector<string> tokens = utilityCore::tokenizeString(line);
+    
     int width = 0;
     int height = 0;
-    char * filename = nullptr;
+    std::string filename;
     for (int i = 0; i < 2; ++i) {
+		string line;
+		utilityCore::safeGetline(fp_in, line);
+		vector<string> tokens = utilityCore::tokenizeString(line);
         if (strcmp(tokens[0].c_str(), "RES") == 0) {
             width = atoi(tokens[1].c_str());
             height = atoi(tokens[2].c_str());
         } else if (strcmp(tokens[0].c_str(), "IMG") == 0) {
-            data = tokens[1].c_str();
+			filename = tokens[1];
         }
     }
-    if (width > 0 && height > 0 && filename) {
-        environmentMap.push_back(Texture(width, height, data));
+	Texture texture = Texture(width, height, filename.c_str());
+    if (texture.host_data) {
+        environmentMap.push_back(Texture(width, height, filename.c_str()));
         return 1;
     } else {
         cout << "Error Loading Environment" << endl;

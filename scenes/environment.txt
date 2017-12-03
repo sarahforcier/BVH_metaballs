@@ -31,4 +31,4 @@ SCALE       3 .3 3
 
 ENVIRONMENT
 RES         4000 2000
-IMG bridgemap.hdr
+IMG ../img/bridgemap.hdr
