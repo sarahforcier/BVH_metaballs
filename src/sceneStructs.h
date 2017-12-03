@@ -80,14 +80,14 @@ struct Texture {
     int width;
     int height;
     int imagesize;
-    float * host_data;
-    float * dev_data;
+    unsigned char * host_data;
+	unsigned char * dev_data;
 
     // see ../external/include/stb_image.h for usage
     Texture(int w, int h, char const *file) : width(w), height(h) {
 		int comp = 3;
-		imagesize = width * height * comp;
-        host_data = stbi_loadf(file, &width, &height, &comp, 0); // 3 components per pixel
+		imagesize = width * height * 3;
+        host_data = stbi_load(file, &width, &height, &comp, 0); // 3 components per pixel
         dev_data = NULL;
     }
 

@@ -121,11 +121,11 @@ void pathtraceInit(Scene *scene)
   	cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
   	if (scene->environmentMap.size() > 0) {
-  		cudaMalloc(&(scene->environmentMap[0].dev_data), scene->environmentMap[0].imagesize * sizeof(float)); // environment map image
-  		cudaMemcpy(scene->environmentMap[0].dev_data, scene->environmentMap[0].host_data, scene->environmentMap[0].imagesize * sizeof(float), cudaMemcpyHostToDevice);
+		cudaMalloc(&dev_environment, sizeof(Texture)); // environment map struct
+		cudaMemcpy(dev_environment, scene->environmentMap.data(), sizeof(Texture), cudaMemcpyHostToDevice);
 
-  		cudaMalloc(&dev_environment, sizeof(Texture)); // environment map struct
-  		cudaMemcpy(dev_environment, scene->environmentMap.data(), sizeof(Texture), cudaMemcpyHostToDevice);
+  		cudaMalloc(&(scene->environmentMap[0].dev_data), scene->environmentMap[0].imagesize * sizeof(unsigned char)); // environment map image
+  		cudaMemcpy(scene->environmentMap[0].dev_data, scene->environmentMap[0].host_data, scene->environmentMap[0].imagesize * sizeof(unsigned char), cudaMemcpyHostToDevice);
   	}
   	
   	cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
