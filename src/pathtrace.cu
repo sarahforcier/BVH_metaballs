@@ -6,6 +6,7 @@
 #include <thrust/remove.h>
 #include <thrust/sort.h>
 
+#include "stream_compaction/efficient_shared.h"
 #include "sceneStructs.h"
 #include "scene.h"
 #include "glm/glm.hpp"
@@ -19,8 +20,8 @@
 
 #define ERRORCHECK 1
 
-#define BVH 1
-#define MAX_BVH_DEPTH 1
+#define BVH 0
+#define MAX_BVH_DEPTH 3
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
@@ -445,6 +446,39 @@ void shadeMetaball(
 			else {
 				pathSegments[idx].color = glm::vec3(0.f);
 			}
+		}
+	}
+}
+
+__global__ void shadeDebug(
+	int iter
+	, int num_paths
+	, ShadeableIntersection * shadeableIntersections
+	, PathSegment * pathSegments
+	, int * indices
+	, Material * materials
+	, Texture * environment
+
+)
+{
+	int idx = blockIdx.x * blockDim.x + threadIdx.x;
+	if (idx < num_paths)
+	{
+		ShadeableIntersection intersection = shadeableIntersections[idx];
+		if (intersection.t > 0.0f) { // if the intersection exists...
+
+			glm::vec3 camdir = intersection.wo;
+			glm::vec3 lightpos = glm::vec3(0, 5, 7);
+			float NdotH = glm::dot(-camdir, intersection.surfaceNormal);
+			float specular = glm::pow(NdotH, 10.f);
+			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
+#if SECANTSTEPDEBUG == 0
+			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
+#endif
+			//pathSegments[idx].color = camdir;
+		}
+		else {
+			pathSegments[idx].color = glm::vec3(0.1f);
 		}
 	}
 }

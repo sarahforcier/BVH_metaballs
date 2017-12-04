@@ -4,7 +4,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 8
+#define NUM_METABALLS_SQRT 5
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
