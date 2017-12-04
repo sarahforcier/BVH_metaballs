@@ -82,12 +82,12 @@ void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* ima
         glm::vec3 pix = image[index];
 
         glm::ivec3 color;
-        //color.x = glm::clamp((int) (pix.x / iter * 255.0), 0, 255);
-        //color.y = glm::clamp((int) (pix.y / iter * 255.0), 0, 255);
-        //color.z = glm::clamp((int) (pix.z / iter * 255.0), 0, 255);
-		color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
-		color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
-		color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);
+        color.x = glm::clamp((int) (pix.x / iter * 255.0), 0, 255);
+        color.y = glm::clamp((int) (pix.y / iter * 255.0), 0, 255);
+        color.z = glm::clamp((int) (pix.z / iter * 255.0), 0, 255);
+		// color.x = glm::clamp((int)(pix.x * 255.0), 0, 255);
+		// color.y = glm::clamp((int)(pix.y * 255.0), 0, 255);
+		// color.z = glm::clamp((int)(pix.z * 255.0), 0, 255);
 
         // Each thread writes one pixel location in the texture (textel)
         pbo[index].w = 0;
@@ -478,7 +478,8 @@ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterationPaths)
 	if (index < nPaths)
 	{
 		PathSegment iterationPath = iterationPaths[index];
-		image[iterationPath.pixelIndex] = iterationPath.color;
+		//image[iterationPath.pixelIndex] = iterationPath.color;
+		image[iterationPath.pixelIndex] += iterationPath.color;
 	}
 }
 
@@ -640,31 +641,16 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
     checkCUDAError("pathtrace");
 }
 
-void pathtraceReset(uchar4 *pbo, int frame, int iter)
+void pathtraceReset()
 {
-	// 1D block for path tracing
-	const int blockSize1d = 128;
-
-	const Camera &cam = hst_scene->state.camera;
-	const int pixelcount = cam.resolution.x * cam.resolution.y;
-
-	int depth = 0;
-	PathSegment* dev_path_end = dev_paths + pixelcount;
-	int num_paths = dev_path_end - dev_paths;
-
 	// move metaballs
+	const int blockSize1d = 128;
 	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
 	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
 	checkCUDAError("translate metaballs");
 
-	// Assemble this iteration and apply it to the image
-	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
-	finalGather << <numBlocksPixels, blockSize1d >> >(num_paths, dev_image, dev_paths);
+	// clear image
+	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
-	// Send results to OpenGL buffer for rendering
-	const dim3 blockSize2d(8, 8);
-	const dim3 blocksPerGrid2d(
-		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
-		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
-	sendImageToPBO << <blocksPerGrid2d, blockSize2d >> >(pbo, cam.resolution, iter, dev_image);
+	checkCUDAError("pathtraceReset");
 }
