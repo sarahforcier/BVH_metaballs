@@ -30,5 +30,5 @@ ROTAT       0 0 0
 SCALE       3 .3 3
 
 ENVIRONMENT
-RES         8192 4096
+RES        2048 1024
 IMG ..\img\inthegarden.jpg

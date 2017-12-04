@@ -80,19 +80,33 @@ struct Texture {
     int width;
     int height;
     int imagesize;
-    unsigned char * host_data;
-	unsigned char * dev_data;
+    float * host_data = nullptr;
+	float * dev_data = nullptr;
 
     // see ../external/include/stb_image.h for usage
     Texture(int w, int h, char const *file) : width(w), height(h) {
 		int comp = 3;
 		imagesize = width * height * 3;
-        host_data = stbi_load(file, &width, &height, &comp, 0); // 3 components per pixel
+        host_data = stbi_loadf(file, &width, &height, &comp, 0); // 3 components per pixel
         dev_data = NULL;
     }
 
+	Texture(const Texture& other) = delete;
+	Texture(Texture&& other)
+		: host_data(other.host_data),
+		dev_data(other.dev_data),
+		width(other.width),
+		height(other.height),
+		imagesize(other.imagesize)
+	{
+		other.host_data = nullptr;
+		other.dev_data = nullptr;
+	}
+
     ~Texture() {
-        stbi_image_free(host_data);
+		if (host_data) {
+			stbi_image_free(host_data);
+		}
     }
 
     // get pixel value from spherical direction

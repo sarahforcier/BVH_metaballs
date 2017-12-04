@@ -171,7 +171,7 @@ bool init() {
 void mainLoop() {
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        runCuda();
+		runPathTracer();
 
         string title = "Metaball Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());

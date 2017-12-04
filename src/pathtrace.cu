@@ -56,6 +56,20 @@ thrust::default_random_engine makeSeededRandomEngine(int iter, int index, int de
     return thrust::default_random_engine(h);
 }
 
+// get pixel value from spherical direction
+__host__ __device__
+glm::vec3 getColor(float * dev_data, int width, int height, glm::vec3& w) {
+	float phi = std::atan2(w.z, w.x);
+	float u = (phi < 0.f ? (phi + TWO_PI) : phi) / TWO_PI;
+	float v = 1.f - std::acos(w.y) / PI;
+
+	int x = glm::min((float)width * u, (float)width - 1.f);
+	int y = glm::min((float)height * (1.f - v), (float)height - 1.f);
+
+	int index = y * width + x;
+	return glm::vec3(dev_data[0], dev_data[0], dev_data[0]);
+}
+
 //Kernel that writes the image to the OpenGL PBO directly.
 __global__ 
 void sendImageToPBO(uchar4* pbo, glm::ivec2 resolution, int iter, glm::vec3* image) 
@@ -121,11 +135,11 @@ void pathtraceInit(Scene *scene)
   	cudaMemcpy(dev_materials, scene->materials.data(), scene->materials.size() * sizeof(Material), cudaMemcpyHostToDevice);
 
   	if (scene->environmentMap.size() > 0) {
+  		cudaMalloc(&(scene->environmentMap[0].dev_data), scene->environmentMap[0].imagesize * sizeof(float)); // environment map image
+  		cudaMemcpy(scene->environmentMap[0].dev_data, scene->environmentMap[0].host_data, scene->environmentMap[0].imagesize * sizeof(float), cudaMemcpyHostToDevice);
+
 		cudaMalloc(&dev_environment, sizeof(Texture)); // environment map struct
 		cudaMemcpy(dev_environment, scene->environmentMap.data(), sizeof(Texture), cudaMemcpyHostToDevice);
-
-  		cudaMalloc(&(scene->environmentMap[0].dev_data), scene->environmentMap[0].imagesize * sizeof(unsigned char)); // environment map image
-  		cudaMemcpy(scene->environmentMap[0].dev_data, scene->environmentMap[0].host_data, scene->environmentMap[0].imagesize * sizeof(unsigned char), cudaMemcpyHostToDevice);
   	}
   	
   	cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
@@ -547,9 +561,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	checkCUDAError("generate Linked List");
 	cudaDeviceSynchronize();
 
-
-	//printf("metaball %f\n", metaballsCPU[hst_scene->metaballs.size() - 1].translation.x);
-
 	bool iterationComplete = false;
 	startCpuTimer();
 	while (!iterationComplete) {
@@ -592,15 +603,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 #endif
 
-		// TODO:
-		// --- Shading Stage ---
-			// Shade path segments based on intersections and generate new rays by
-			// evaluating the BSDF.
-			// Start off with just a big kernel that handles all the different
-			// materials you have in the scenefile.
-			// TODO: compare between directly shading the path segments and shading
-			// path segments that have been reshuffled to be contiguous in memory.
-
 		shadeMetaballs<<<numblocksPathSegmentTracing, blockSize1d>>> (
 			iter,
 			num_paths,
@@ -609,11 +611,13 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 			dev_materials,
 			dev_environment
 			);
+		checkCUDAError("shading");
 		iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
 	endCpuTimer();
 	printf("the rest\n \n");
 	printCPUTime();
+
 	// what is counter? is it ever greater than size of dev_nodeBuffer
 	int count;
 	cudaMemcpy(&count, dev_LLcounter, sizeof(int), cudaMemcpyDeviceToHost);
@@ -622,15 +626,45 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
 	finalGather<<<numBlocksPixels, blockSize1d>>>(num_paths, dev_image, dev_paths);
+	checkCUDAError("finalGather");
 
     ///////////////////////////////////////////////////////////////////////////
 
     // Send results to OpenGL buffer for rendering
     sendImageToPBO<<<blocksPerGrid2d, blockSize2d>>>(pbo, cam.resolution, iter, dev_image);
+	checkCUDAError("sendImageToPBO");
 
     // Retrieve image from GPU
-    cudaMemcpy(hst_scene->state.image.data(), dev_image,
-            pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
+    cudaMemcpy(hst_scene->state.image.data(), dev_image, pixelcount * sizeof(glm::vec3), cudaMemcpyDeviceToHost);
 
     checkCUDAError("pathtrace");
+}
+
+void pathtraceReset(uchar4 *pbo, int frame, int iter)
+{
+	// 1D block for path tracing
+	const int blockSize1d = 128;
+
+	const Camera &cam = hst_scene->state.camera;
+	const int pixelcount = cam.resolution.x * cam.resolution.y;
+
+	int depth = 0;
+	PathSegment* dev_path_end = dev_paths + pixelcount;
+	int num_paths = dev_path_end - dev_paths;
+
+	// move metaballs
+	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
+	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
+	checkCUDAError("translate metaballs");
+
+	// Assemble this iteration and apply it to the image
+	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
+	finalGather << <numBlocksPixels, blockSize1d >> >(num_paths, dev_image, dev_paths);
+
+	// Send results to OpenGL buffer for rendering
+	const dim3 blockSize2d(8, 8);
+	const dim3 blocksPerGrid2d(
+		(cam.resolution.x + blockSize2d.x - 1) / blockSize2d.x,
+		(cam.resolution.y + blockSize2d.y - 1) / blockSize2d.y);
+	sendImageToPBO << <blocksPerGrid2d, blockSize2d >> >(pbo, cam.resolution, iter, dev_image);
 }

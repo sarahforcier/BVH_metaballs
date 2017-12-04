@@ -238,7 +238,7 @@ int Scene::loadEnvironment() {
     }
 	Texture texture = Texture(width, height, filename.c_str());
     if (texture.host_data) {
-        environmentMap.push_back(Texture(width, height, filename.c_str()));
+		environmentMap.emplace_back(std::move(texture));
         return 1;
     } else {
         cout << "Error Loading Environment" << endl;
