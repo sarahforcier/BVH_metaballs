@@ -33,7 +33,9 @@ extern int iter_count;
 extern int width;
 extern int height;
 
-void runCuda();
+void runCuda(int iter, int frame);
+void runCudaReset(int iter, int frame);
+void runPathTracer(int frame);
 void keyCallback(GLFWwindow *window, int key, int scancode, int action, int mods);
 void mousePositionCallback(GLFWwindow* window, double xpos, double ypos);
 void mouseButtonCallback(GLFWwindow* window, int button, int action, int mods);

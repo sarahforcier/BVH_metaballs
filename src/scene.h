@@ -14,6 +14,7 @@ class Scene {
 private:
     ifstream fp_in;
     int loadMaterial(string materialid);
+    int loadEnvironment();
     int loadGeom(string objectid);
 	int loadMetaballs(int num);
     int loadCamera();
@@ -24,5 +25,6 @@ public:
     std::vector<Geom> geoms;
 	std::vector<Metaball> metaballs;
     std::vector<Material> materials;
+    std::vector<Texture> environmentMap;
     RenderState state;
 };

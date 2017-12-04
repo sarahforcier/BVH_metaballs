@@ -3,7 +3,9 @@
 #include <string>
 #include <vector>
 #include <cuda_runtime.h>
+#include "stb_image.h"
 #include "glm/glm.hpp"
+#include "utilities.h"
 
 #define BACKGROUND_COLOR (glm::vec3(0.0f))
 
@@ -74,6 +76,54 @@ struct Material {
     float emittance;
 };
 
+struct Texture {
+    int width;
+    int height;
+    int imagesize;
+    float * host_data = nullptr;
+	float * dev_data = nullptr;
+
+    // see ../external/include/stb_image.h for usage
+    Texture(int w, int h, char const *file) : width(w), height(h) {
+		int comp = 3;
+		imagesize = width * height * 3;
+        host_data = stbi_loadf(file, &width, &height, &comp, 0); // 3 components per pixel
+        dev_data = NULL;
+    }
+
+	Texture(const Texture& other) = delete;
+	Texture(Texture&& other)
+		: host_data(other.host_data),
+		dev_data(other.dev_data),
+		width(other.width),
+		height(other.height),
+		imagesize(other.imagesize)
+	{
+		other.host_data = nullptr;
+		other.dev_data = nullptr;
+	}
+
+    ~Texture() {
+		if (host_data) {
+			stbi_image_free(host_data);
+		}
+    }
+
+    // get pixel value from spherical direction
+    __host__ __device__
+    glm::vec3 getColor(glm::vec3& w) {   
+        float phi = std::atan2(w.z, w.x);
+        float u = (phi < 0.f ? (phi + TWO_PI) : phi) / TWO_PI;
+        float v = 1.f - std::acos(w.y) / PI;
+        
+        int x = glm::min((float)width * u, (float)width - 1.f);
+        int y = glm::min((float)height * (1.f - v), (float)height - 1.f);
+
+        int index = y * width + x;
+        return glm::vec3(dev_data[index * 3], dev_data[index * 3 + 1], dev_data[index * 3 + 2]);
+    }
+};
+
 struct Camera {
     glm::ivec2 resolution;
     glm::vec3 position;
@@ -106,6 +156,7 @@ struct PathSegment {
 struct ShadeableIntersection {
   float t;
   glm::vec3 surfaceNormal;
+  glm::vec3 surfacePoint;
   int materialId;
   glm::vec3 wo;
   glm::vec3 debug;

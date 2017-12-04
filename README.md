@@ -24,8 +24,9 @@ Path tracing and ray-isosurface intersection (visualization of metaballs)
 
 
 ## Milestone November 27, 2017
+![](img/LinkedList.gif)
+
 ![](img/splitbvh.png)
-TODO: Optimize with BVH
 
 ## Milestone December 4, 2017
 TODO: Implement reflective and refractive materials

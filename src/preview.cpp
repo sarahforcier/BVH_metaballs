@@ -169,9 +169,10 @@ bool init() {
 }
 
 void mainLoop() {
+    int frame = 0;
     while (!glfwWindowShouldClose(window)) {
         glfwPollEvents();
-        runCuda();
+		runPathTracer(frame);
 
         string title = "Metaball Path Tracer | " + utilityCore::convertIntToString(iteration) + " Iterations";
         glfwSetWindowTitle(window, title.c_str());
@@ -184,6 +185,7 @@ void mainLoop() {
         // VAO, shader program, and texture already bound
         glDrawElements(GL_TRIANGLES, 6,  GL_UNSIGNED_SHORT, 0);
         glfwSwapBuffers(window);
+        frame ++;
     }
     glfwDestroyWindow(window);
     glfwTerminate();

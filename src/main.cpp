@@ -2,7 +2,7 @@
 #include "preview.h"
 #include <cstring>
 
-#define MAX_ITERATIONS 4
+#define MAX_ITERATIONS 1
 
 static std::string startTimeString;
 
@@ -24,7 +24,6 @@ glm::vec3 ogLookAt; // for recentering the camera
 Scene *scene;
 RenderState *renderState;
 int iteration;
-int iter_count;
 
 int width;
 int height;
@@ -48,7 +47,6 @@ int main(int argc, char** argv) {
 
     // Set up camera stuff from loaded path tracer settings
     iteration = 0;
-	iter_count = 0;
     renderState = &scene->state;
     Camera &cam = renderState->camera;
     width = cam.resolution.x;
@@ -102,28 +100,7 @@ void saveImage() {
     //img.saveHDR(filename);  // Save a Radiance HDR file
 }
 
-void runCuda() {
-    if (camchanged) {
-        //iteration = 0; avoid scene reconstruction when camera moves
-        Camera &cam = renderState->camera;
-        cameraPosition.x = zoom * sin(phi) * sin(theta);
-        cameraPosition.y = zoom * cos(theta);
-        cameraPosition.z = zoom * cos(phi) * sin(theta);
-
-        cam.view = -glm::normalize(cameraPosition);
-        glm::vec3 v = cam.view;
-        glm::vec3 u = glm::vec3(0, 1, 0);//glm::normalize(cam.up);
-        glm::vec3 r = glm::cross(v, u);
-        cam.up = glm::cross(r, v);
-        cam.right = r;
-
-        cam.position = cameraPosition;
-        cameraPosition += cam.lookAt;
-        cam.position = cameraPosition;
-        camchanged = false;
-
-      }
-
+void runCuda(int iter, int frame) {
     // Map OpenGL buffer object for writing from CUDA on a single GPU
     // No data is moved (Win & Linux). When mapped to CUDA, OpenGL should not use this buffer
 
@@ -135,15 +112,10 @@ void runCuda() {
     if (iteration < renderState->iterations) {
         uchar4 *pbo_dptr = NULL;
         iteration++;
-		iter_count++;
-		if (iter_count > MAX_ITERATIONS) {
-			iter_count = 0;
-		}
         cudaGLMapBufferObject((void**)&pbo_dptr, pbo);
 
         // execute the kernel
-        int frame = 0;
-        pathtrace(pbo_dptr, frame, iter_count);
+        pathtrace(pbo_dptr, frame, iter);
 
         // unmap buffer object
         cudaGLUnmapBufferObject(pbo);
@@ -153,6 +125,42 @@ void runCuda() {
         cudaDeviceReset();
         exit(EXIT_SUCCESS);
     }
+}
+
+void runCudaReset() {
+	if (iteration == 0) {
+		pathtraceFree();
+		pathtraceInit(scene);
+	}
+
+	pathtraceReset();
+}
+
+void runPathTracer(int frame) {
+	for (int i = 1; i <= MAX_ITERATIONS; ++i) {
+        if (camchanged) {
+            //iteration = 0; avoid scene reconstruction when camera moves
+            Camera &cam = renderState->camera;
+            cameraPosition.x = zoom * sin(phi) * sin(theta);
+            cameraPosition.y = zoom * cos(theta);
+            cameraPosition.z = zoom * cos(phi) * sin(theta);
+
+            cam.view = -glm::normalize(cameraPosition);
+            glm::vec3 v = cam.view;
+            glm::vec3 u = glm::vec3(0, 1, 0); //glm::normalize(cam.up);
+            glm::vec3 r = glm::cross(v, u);
+            cam.up = glm::cross(r, v);
+            cam.right = r;
+
+            cam.position = cameraPosition;
+            cameraPosition += cam.lookAt;
+            cam.position = cameraPosition;
+            camchanged = false;
+            break;
+        }
+		runCuda(i, frame); // pathtrace
+	}
+	runCudaReset(); // new frame
 }
 
 void keyCallback(GLFWwindow* window, int key, int scancode, int action, int mods) {
