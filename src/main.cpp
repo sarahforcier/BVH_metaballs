@@ -2,7 +2,7 @@
 #include "preview.h"
 #include <cstring>
 
-#define MAX_ITERATIONS 4
+#define MAX_ITERATIONS 1
 
 static std::string startTimeString;
 

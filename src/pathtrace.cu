@@ -104,6 +104,7 @@ static Material * dev_materials = NULL;
 static Texture * dev_environment = NULL;
 static PathSegment * dev_paths = NULL;
 static ShadeableIntersection * dev_intersections = NULL;
+static int * dev_indices = NULL;
 
 static Metaball * dev_metaballs = NULL;
 static Metaball * dev_splitMetaballs = NULL;
@@ -145,6 +146,8 @@ void pathtraceInit(Scene *scene)
   	cudaMalloc(&dev_intersections, pixelcount * sizeof(ShadeableIntersection));
   	cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
+	cudaMalloc(&dev_indices, pixelcount * sizeof(int));
+
 	cudaMalloc(&dev_metaballs, scene->metaballs.size() * sizeof(Metaball)); // metaball memory
 	cudaMemcpy(dev_metaballs, scene->metaballs.data(), scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
 
@@ -176,6 +179,7 @@ void pathtraceFree()
   	cudaFree(dev_materials);
   	cudaFree(dev_environment); 
   	cudaFree(dev_intersections);
+	cudaFree(dev_indices);
 
 	cudaFree(dev_metaballs);
 	cudaFree(dev_ballDist);
@@ -196,7 +200,7 @@ void pathtraceFree()
 * lens effect - jitter ray origin positions based on a lens
 */
 __global__ 
-void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments)
+void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pathSegments, int* indices)
 {
 	int x = (blockIdx.x * blockDim.x) + threadIdx.x;
 	int y = (blockIdx.y * blockDim.y) + threadIdx.y;
@@ -215,6 +219,7 @@ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pa
 			);
 
 		segment.pixelIndex = index;
+		indices[index] = index + 1;
 		segment.remainingBounces = traceDepth;
 	}
 }
@@ -258,6 +263,7 @@ void computeIntersections(
 	int depth,
 	PathSegment * pathSegments, 
 	int num_paths,
+	int * indices,
 	Geom * geoms, 
 	int geoms_size,
 	ShadeableIntersection * intersections,
@@ -343,6 +349,7 @@ void computeIntersections(
 		intersections[path_index].materialId = 0; // TODO
 		intersections[path_index].wo = pathSegment.ray.direction;
 		intersections[path_index].surfaceNormal = calculateNormals(num_balls, metaballs, x2);
+		intersections[path_index].surfacePoint = x2;
 	}
 }
 
@@ -394,75 +401,48 @@ void computeBallDist(int num_balls, glm::vec3 cam_pos, Metaball * metaballs, flo
 }
 
 __global__ 
-void shadeFakeMaterial (int iter, int num_paths,
+void shadeMetaball(
+	int iter,
+	int num_paths,
 	ShadeableIntersection * shadeableIntersections,
 	PathSegment * pathSegments,
-	Material * materials)
-{
-  int idx = blockIdx.x * blockDim.x + threadIdx.x;
-  if (idx < num_paths)
-  {
-    ShadeableIntersection intersection = shadeableIntersections[idx];
-    if (intersection.t > 0.0f) { // if the intersection exists...
-      // Set up the RNG
-      // LOOK: this is how you use thrust's RNG! Please look at
-      // makeSeededRandomEngine as well.
-      thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, 0);
-      thrust::uniform_real_distribution<float> u01(0, 1);
-
-      Material material = materials[intersection.materialId];
-      glm::vec3 materialColor = material.color;
-
-      // If the material indicates that the object was a light, "light" the ray
-      if (material.emittance > 0.0f) {
-        pathSegments[idx].color *= (materialColor * material.emittance);
-      }
-      // Otherwise, do some pseudo-lighting computation. This is actually more
-      // like what you would expect from shading in a rasterizer like OpenGL.
-      // TODO: replace this! you should be able to start with basically a one-liner
-      else {
-        float lightTerm = glm::dot(intersection.surfaceNormal, glm::vec3(0.0f, 1.0f, 0.0f));
-        pathSegments[idx].color *= (materialColor * lightTerm) * 0.3f + ((1.0f - intersection.t * 0.02f) * materialColor) * 0.7f;
-        pathSegments[idx].color *= u01(rng); // apply some noise because why not
-      }
-    // If there was no intersection, color the ray black.
-    // Lots of renderers use 4 channel color, RGBA, where A = alpha, often
-    // used for opacity, in which case they can indicate "no opacity".
-    // This can be useful for post-processing and image compositing.
-    } else {
-      pathSegments[idx].color = glm::vec3(0.0f);
-    }
-  }
-}
-
-__global__ 
-void shadeMetaballs(
-	int iter, int num_paths,
-	ShadeableIntersection * shadeableIntersections,
-	PathSegment * pathSegments,
+	int * indices,
 	Material * materials,
 	Texture * environment)
 {
 	int idx = blockIdx.x * blockDim.x + threadIdx.x;
-	if (idx < num_paths) {
+	if (idx < num_paths)
+	{
 		ShadeableIntersection intersection = shadeableIntersections[idx];
 		if (intersection.t > 0.0f) { // if the intersection exists...
+									 // Set up the RNG
+									 // LOOK: this is how you use thrust's RNG! Please look at
+									 // makeSeededRandomEngine as well.
+			thrust::default_random_engine rng = makeSeededRandomEngine(iter, idx, 0);
+			thrust::uniform_real_distribution<float> u01(0, 1);
 
-			glm::vec3 camdir = intersection.wo;
-			glm::vec3 lightpos = glm::vec3(0, 5, 7);
-			float NdotH = glm::dot(-camdir, intersection.surfaceNormal);
-			float specular = glm::pow(NdotH, 10.f);
-			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
-#if SECANTSTEPDEBUG == 0
-			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
-			//pathSegments[idx].color = intersection.debug;
-#endif
-			//pathSegments[idx].color = camdir;
-		} else {
+			Material material = materials[intersection.materialId];
+			glm::vec3 materialColor = material.color;
 
+			// If the material indicates that the object was a light, "light" the ray
+			if (material.emittance > 0.0f) {
+				pathSegments[idx].color *= (materialColor * material.emittance);
+			}
+
+			// TODO : lighting computation
+			else {
+				scatterRay(pathSegments[idx], intersection.surfacePoint, intersection.surfaceNormal, material, rng);
+			}
+		}
+		// If there was no intersection, color the ray black.
+		// Lots of renderers use 4 channel color, RGBA, where A = alpha, often
+		// used for opacity, in which case they can indicate "no opacity".
+		// This can be useful for post-processing and image compositing.
+		else {
 			if (environment) {
 				pathSegments[idx].color = environment->getColor(pathSegments[idx].ray.direction);
-			} else {
+			}
+			else {
 				pathSegments[idx].color = glm::vec3(0.f);
 			}
 		}
@@ -502,10 +482,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	// 1D block for path tracing
 	const int blockSize1d = 128;
 
-	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d >>>(cam, iter, traceDepth, dev_paths);
+	generateRayFromCamera <<<blocksPerGrid2d, blockSize2d >>>(cam, iter, traceDepth, dev_paths, dev_indices);
 	checkCUDAError("generate camera ray");
 
-	int depth = 0;
 	PathSegment* dev_path_end = dev_paths + pixelcount;
 	int num_paths = dev_path_end - dev_paths;
 
@@ -513,8 +492,8 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 	// move metaballs
 	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
-	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
-	checkCUDAError("translate metaballs");
+	//translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
+	//checkCUDAError("translate metaballs");
 
 	// calculate ball distance from camera
 	computeBallDist << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), hst_scene->state.camera.position, dev_metaballs, dev_ballDist);
@@ -564,7 +543,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 	bool iterationComplete = false;
 	startCpuTimer();
-	while (!iterationComplete) {
+
+	int depth = 0;
+	while (depth < 15) {
 
 		// clean shading chunks
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
@@ -574,6 +555,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
 			depth,
 			dev_paths, num_paths,
+			dev_indices,
 			dev_geoms, hst_scene->geoms.size(),
 			dev_intersections,
 			dev_metaballs, hst_scene->metaballs.size(),
@@ -594,6 +576,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
 			dev_paths, num_paths,
+			dev_indices,
 			dev_geoms, hst_scene->geoms.size(),
 			dev_intersections,
 			dev_metaballs, hst_scene->metaballs.size(),
@@ -604,16 +587,17 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 #endif
 
-		shadeMetaballs<<<numblocksPathSegmentTracing, blockSize1d>>> (
+		shadeMetaball<<<numblocksPathSegmentTracing, blockSize1d>>> (
 			iter,
 			num_paths,
 			dev_intersections,
 			dev_paths,
+			dev_indices,
 			dev_materials,
 			dev_environment
 			);
 		checkCUDAError("shading");
-		iterationComplete = true; // TODO: should be based off stream compaction results.
+		//iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
 	endCpuTimer();
 	printf("the rest\n \n");
@@ -650,6 +634,8 @@ void pathtraceReset()
 	checkCUDAError("translate metaballs");
 
 	// clear image
+	const Camera &cam = hst_scene->state.camera;
+	const int pixelcount = cam.resolution.x * cam.resolution.y;
 	cudaMemset(dev_image, 0, pixelcount * sizeof(glm::vec3));
 
 	checkCUDAError("pathtraceReset");
