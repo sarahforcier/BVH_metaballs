@@ -20,7 +20,7 @@
 #define ERRORCHECK 1
 
 #define BVH 1
-#define MAX_BVH_DEPTH 2
+#define MAX_BVH_DEPTH 1
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
@@ -531,12 +531,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 	// of closest metaball from camera (since previous sort descending)
 	cudaMemset(dev_LLcounter, 0, sizeof(int));
 	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
-	generateLinkedList<<<numblocksPathSegmentTracing, blockSize1d>>>(
-		dev_paths, num_paths, 
-		dev_metaballs, hst_scene->metaballs.size(), 
-		dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer, iter);
-	checkCUDAError("generate Linked List");
-	cudaDeviceSynchronize();
+
 
 
 	//printf("metaball %f\n", metaballsCPU[hst_scene->metaballs.size() - 1].translation.x);
@@ -549,6 +544,13 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
 #if !BVH
+		generateLinkedList << <numblocksPathSegmentTracing, blockSize1d >> >(
+			dev_paths, num_paths,
+			dev_metaballs, hst_scene->metaballs.size(),
+			dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer, iter);
+		checkCUDAError("generate Linked List");
+		cudaDeviceSynchronize();
+
 		// tracing
 		computeIntersections <<<numblocksPathSegmentTracing, blockSize1d>>> (
 			depth,
@@ -570,6 +572,19 @@ void pathtrace(uchar4 *pbo, int frame, int iter) {
 		checkCUDAError("setBVHTransform");
 		cudaDeviceSynchronize();
 
+		computeLinkedListBVH << <numblocksPathSegmentTracing, blockSize1d >> >(
+			depth
+			, num_paths
+			, dev_paths
+			, dev_intersections
+			, dev_bvhTree
+			, num_bvh_nodes
+			, dev_geoms
+			, dev_metaballs
+			, hst_scene->metaballs.size()
+			, iter
+			, dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer
+		);
 		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
 			dev_paths, num_paths,

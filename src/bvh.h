@@ -365,7 +365,7 @@ void buildBVHNode(int depth,
 	// for all metaballs in metaballs to metaballs + num_metaballs
 	// distribute to left or right child node
 
-	printf("bvh idx %i, num balls %i \n", bvh_idx, num_metaballs);
+	//printf("bvh idx %i, num balls %i \n", bvh_idx, num_metaballs);
 
 	if (depth == max_depth || num_metaballs <= 1) {
 		BVHNodes[bvh_idx].isLeaf = true;
@@ -384,7 +384,7 @@ void buildBVHNode(int depth,
 	float val = bbox.minB[axis] + (bbox.maxB[axis] - bbox.minB[axis]) / 2.0f ;
 
 	Metaball* end = thrust::partition(thrust::host, metaballs, metaballs + num_metaballs, less_than_axis(axis, val));
-	printf("partition idx %i %f %i\n", axis, val, end - metaballs);
+	//printf("partition idx %i %f %i\n", axis, val, end - metaballs);
 
 	// assume "left" child is < than "val" in "axis"
 
@@ -412,7 +412,7 @@ void buildBVHNode(int depth,
 	for (int i = 0; i < splitBalls.size(); i++) {
 		if (metaballIntersectsBBox(splitBalls[i], lChildBBox)) {
 			lSplitBalls.push_back(splitBalls[i]);
-			BBoxMetaballUnion(lMetaballBbox, metaballs[i]);
+			BBoxMetaballUnion(lMetaballBbox, splitBalls[i]);
 		}
 	}
 	// lChildBbox <- intersection of lChildBbox and lBallBbox
@@ -431,7 +431,7 @@ void buildBVHNode(int depth,
 	for (int i = 0; i < splitBalls.size(); i++) {
 		if (metaballIntersectsBBox(splitBalls[i], rChildBBox)) {
 			rSplitBalls.push_back(splitBalls[i]);
-			BBoxMetaballUnion(rMetaballBbox, metaballs[i]);
+			BBoxMetaballUnion(rMetaballBbox, splitBalls[i]);
 		}
 	}
 
@@ -547,6 +547,121 @@ __host__ __device__ float BVHIntersectionTest(BVHNode box, Ray r,
 		return glm::length(r.origin - intersectionPoint);
 	}
 	return -1;
+}
+
+
+__global__ void computeLinkedListBVH(
+	int depth
+	, int num_paths
+	, PathSegment * pathSegments
+	, ShadeableIntersection * intersections
+	, BVHNode * BVHNodes
+	, int num_bvh
+	, Geom* geoms
+	, Metaball * metaballs
+	, int ball_size
+	, int iter
+	, int * LLcounter,
+	int * headPtrBuffer,
+	LLNode * nodeBuffer
+)
+{
+	int path_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (path_index < num_paths)
+	{
+		glm::vec2 geom_ranges[300];
+		int geom_idx = 0;
+		PathSegment pathSegment = pathSegments[path_index];
+		BVHNode* stack[300];
+		BVHNode* * stackPtr = stack;
+		*stackPtr++ = NULL; // push
+
+		bool loutside = true;
+		bool routside = true;
+
+		glm::vec3 ltmp_intersect;
+		glm::vec3 ltmp_normal;
+		glm::vec3 rtmp_intersect;
+		glm::vec3 rtmp_normal;
+
+		// naive parse through global geoms
+
+		BVHNode * curr_bvh = &BVHNodes[0];
+		bool loop = true;
+
+		while (curr_bvh != NULL) {
+			BVHNode *lchild = &BVHNodes[curr_bvh->child1id];
+			BVHNode *rchild = &BVHNodes[curr_bvh->child2id];
+			float t1 = BVHIntersectionTest(*lchild, pathSegment.ray, ltmp_intersect, ltmp_normal, loutside);
+			float t2 = BVHIntersectionTest(*rchild, pathSegment.ray, rtmp_intersect, rtmp_normal, routside);
+
+			BVHNode * child1 = (t1 < t2) ? lchild : rchild;
+			BVHNode * child2 = (t1 < t2) ? rchild : lchild;;
+			if (t1 > t2) {
+				float temp = t1;
+				t1 = t2;
+				t2 = temp;
+			}
+
+			if (t1 > 0.0f && child1->isLeaf) {
+				geom_ranges[geom_idx++] = glm::vec2(child1->startM, child1->endM);
+				//queue up geoms for intersection test
+			}
+			if (t2 > 0.0f && child2->isLeaf) {
+				geom_ranges[geom_idx++] = glm::vec2(child2->startM, child2->endM);
+				//queue up geoms for intersection test
+			}
+
+			bool traverseL = (t1 > 0.0f && !child1->isLeaf);
+			bool traverseR = (t2 > 0.0f && !child2->isLeaf);
+
+			if (!traverseL && !traverseR) {
+				curr_bvh = *--stackPtr; // pop
+			}
+			else
+			{
+				int r_id = curr_bvh->child2id;
+				curr_bvh = ((t1 > 0.0f && !child1->isLeaf)) ? child1 : child2;
+				if ((t1 > 0.0f && !child1->isLeaf) && (t2 > 0.0f && !child2->isLeaf)) {
+					*stackPtr++ = child2; // push
+				}
+			}
+		}
+
+		float t;
+		glm::vec3 intersect_point;
+		glm::vec3 normal;
+		float t_min = FLT_MAX;
+		int hit_geom_index = -1;
+		bool outside = true;
+
+		glm::vec3 tmp_intersect;
+		glm::vec3 tmp_normal;
+
+		int offset = path_index * ball_size;
+		int count = 0;
+
+		for (int i = 0; i < geom_idx; i++) { //use to be i < geom_idx
+			int start = geom_ranges[i][0];
+			int end = geom_ranges[i][1];
+
+			for (int m = start; m <= end; m++) {
+				Metaball & ball = metaballs[m];
+				float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
+
+				if (t > 0.0f) {
+					int count = atomicAdd(LLcounter, 1); // returns before add
+					LLNode &node = nodeBuffer[count];
+					node.metaballid = m;
+					node.next = headPtrBuffer[path_index];
+					headPtrBuffer[path_index] = count;
+				}
+
+			}
+		}
+
+	}
 }
 
 //__global__ void computeBVHIntersections(
@@ -682,71 +797,5 @@ __host__ __device__ float BVHIntersectionTest(BVHNode box, Ray r,
 //			//}
 //		}
 //
-//
-//		thrust::sort_by_key(thrust::seq, ballDist + offset, ballDist + offset + count, ballHits + offset);
-//
-//		float final_t = ballDist[offset];
-//
-//		glm::vec3 debug_vector = metaballs[ballHits[offset]].translation;
-//
-//		// find first positive influence
-//
-//		int first;
-//		float density = 0.f;
-//		float s;
-//		glm::vec3 x;
-//		for (first = 0; first < count; ++first) {
-//			// calculate influence
-//			s = glm::dot(pathSegment.ray.direction, metaballs[ballHits[offset + first]].translation - pathSegment.ray.origin);
-//			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
-//
-//			density = calculateDensity(count, metaballs, ballHits, offset, x);
-//			if (density > 0) {
-//				break;
-//			}
-//		}
-//
-//		//do the secant method
-//		float t0 = 0;
-//		float t1 = s;
-//
-//		float f1 = density;
-//		float f0 = calculateDensity(count, metaballs, ballHits, offset, pathSegment.ray.origin);
-//		float t2 = 0;
-//		float f2 = 0;
-//		int steps = 0;
-//		glm::vec3 x2;
-//		while (first != count && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
-//			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
-//			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
-//			f2 = calculateDensity(count, metaballs, ballHits, offset, x2);
-//			if (f2 > 0) {
-//				t1 = t2;
-//				f1 = f2;
-//			}
-//			else {
-//				t0 = t2;
-//				f0 = f2;
-//			}
-//			steps++;
-//		}
-//
-//		normal = calculateNormals(ball_size, metaballs, offset, x2);
-//		glm::vec3 color_test = calculateColor(ball_size, metaballs, offset, x2);
-//		final_t = (first != count) ? t2 : -1.f;
-//
-//			if (hit_geom_index == -1)
-//			{
-//				intersections[path_index].t = -1.0f;
-//			}
-//			else
-//			{
-//				//The ray hits something
-//				intersections[path_index].debug = color_test;
-//				intersections[path_index].t = final_t;
-//				intersections[path_index].materialId = geoms[hit_geom_index].materialid;
-//				intersections[path_index].wo = pathSegment.ray.direction;
-//				intersections[path_index].surfaceNormal = normal;
-//			}
 //	}
 //}
