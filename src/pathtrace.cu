@@ -20,13 +20,13 @@
 
 #define ERRORCHECK 1
 
-#define BVH 0
+
 #define MAX_BVH_DEPTH 3
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
-#define MAXLISTSIZE 500
+#define MAXLISTSIZE 100
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -225,6 +225,7 @@ void generateRayFromCamera(Camera cam, int iter, int traceDepth, PathSegment* pa
 	}
 }
 
+#if !BVH
 __global__ 
 void generateLinkedList(
 	PathSegment * pathSegments, 
@@ -244,12 +245,13 @@ void generateLinkedList(
 		glm::vec3 normal;
 		bool outside = true;
 		for (int i = 0; i < num_balls; i++) {
-			Metaball & ball = metaballs[i];
+			Metaball ball = metaballs[i];
 			float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
 			if (t > 0.0f) {
 				int count = atomicAdd(LLcounter, 1); // returns before add
 				LLNode &node = nodeBuffer[count];
-				node.metaballid = i;
+				node.metaball = ball;
+				//node.metaballid = i;
 				node.next = headPtrBuffer[path_index];
 				headPtrBuffer[path_index] = count;
 			}
@@ -290,31 +292,37 @@ void computeIntersections(
 		// find first positive influence
 		float density = 0.f;
 		float s;
+		float first_s = FLT_MAX;
+		float first_density = 0.f;
 		glm::vec3 x;
 		int node_idx = first_node_idx;
 		while (node_idx >= 0) {
 			// calculate influence
-			s = glm::dot(pathSegment.ray.direction, metaballs[nodeBuffer[node_idx].metaballid].translation - pathSegment.ray.origin);
+			//s = glm::dot(pathSegment.ray.direction, metaballs[nodeBuffer[node_idx].metaballid].translation - pathSegment.ray.origin);
+			s = glm::dot(pathSegment.ray.direction, nodeBuffer[node_idx].metaball.translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
 
 			density = calculateDensity(metaballs, first_node_idx, nodeBuffer, x);
-			if (density > 0) {
-				break;
+			if (density > 0 && first_s > s) {
+				first_s = s;
+				first_density = density;
 			}
 			node_idx = nodeBuffer[node_idx].next;
 		}
 
+		
+
 		// Secant method (root finding)
 		float t0 = 0;
-		float t1 = s;
+		float t1 = first_s;
 		
-		float f1 = density;
+		float f1 = first_density;
 		float f0 = calculateDensity(metaballs, first_node_idx, nodeBuffer, pathSegment.ray.origin);
 		float t2 = 0;
 		float f2 = 0;
 		int steps = 0;
 		glm::vec3 x2;
-		while (node_idx > 0 && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
+		while (first_s != FLT_MAX && (t1 - t0 > 0.0001) && steps < MAXSECANTSTEPS) {
 			t2 = t1 - f1 * (t1 - t0) / (f1 - f0);
 			x2 = pathSegment.ray.origin + t2 * pathSegment.ray.direction;
 			f2 = calculateDensity(metaballs, first_node_idx, nodeBuffer, x2);
@@ -337,7 +345,7 @@ void computeIntersections(
 
 		//The ray hits something
 		//intersections[path_index].t = t_min;
-		intersections[path_index].t = (node_idx > 0) ? t2 : -1.f;
+		intersections[path_index].t = (first_s != FLT_MAX) ? t2 : -1.f;
 
 		intersections[path_index].debug = color_test;
 #if SECANTSTEPDEBUG
@@ -353,6 +361,7 @@ void computeIntersections(
 		intersections[path_index].surfacePoint = x2;
 	}
 }
+#endif
 
 __global__ 
 void translateMetaballs(int num_balls, Metaball * metaballs)
@@ -529,16 +538,16 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	//translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs);
 	//checkCUDAError("translate metaballs");
 
-	// calculate ball distance from camera
-	computeBallDist << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), hst_scene->state.camera.position, dev_metaballs, dev_ballDist);
-	checkCUDAError("ball distance computation");
-	cudaDeviceSynchronize();
+	//// calculate ball distance from camera
+	//computeBallDist << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), hst_scene->state.camera.position, dev_metaballs, dev_ballDist);
+	//checkCUDAError("ball distance computation");
+	//cudaDeviceSynchronize();
 
-	// sort metaballs based on distance from camera
-	// so when added to linked list, already in order
-	thrust::sort_by_key(thrust::device, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs, thrust::greater<float>());
-	checkCUDAError("sort metaball distance");
-	cudaDeviceSynchronize();
+	//// sort metaballs based on distance from camera
+	//// so when added to linked list, already in order
+	//thrust::sort_by_key(thrust::device, dev_ballDist, dev_ballDist + hst_scene->metaballs.size(), dev_metaballs, thrust::greater<float>());
+	//checkCUDAError("sort metaball distance");
+	//cudaDeviceSynchronize();
 
 #if BVH
 	startCpuTimer();
@@ -566,16 +575,17 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	// Concurrent Linked List Construction
 	// head pointer buffer contains index into node buffer for each path
 	// of closest metaball from camera (since previous sort descending)
-	cudaMemset(dev_LLcounter, 0, sizeof(int));
-	cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
+
 
 
 	bool iterationComplete = false;
 	startCpuTimer();
 
 	int depth = 0;
-	while (depth < 15) {
-
+	while (depth < 2) {
+		cudaMemset(dev_LLcounter, 0, sizeof(int));
+		cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
+		cudaMemset(dev_nodeBuffer, -1, MAXLISTSIZE * pixelcount * sizeof(LLNode));
 		// clean shading chunks
 		cudaMemset(dev_intersections, 0, pixelcount * sizeof(ShadeableIntersection));
 
@@ -618,25 +628,30 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 			, num_bvh_nodes
 			, dev_geoms
 			, dev_metaballs
+			, dev_splitMetaballs
 			, hst_scene->metaballs.size()
 			, iter
 			, dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer
 		);
-		computeIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
+
+		checkCUDAError("compute Linked List with BVH");
+		cudaDeviceSynchronize();
+		computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
 			dev_paths, num_paths,
 			dev_indices,
 			dev_geoms, hst_scene->geoms.size(),
 			dev_intersections,
 			dev_metaballs, hst_scene->metaballs.size(),
-			dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer);
+			dev_LLcounter, dev_headPtrBuffer, dev_nodeBuffer,
+			dev_bvhTree,dev_splitMetaballs);
 		checkCUDAError("compute Intersection with BVH");
 		cudaDeviceSynchronize();
 		depth++;
 
 #endif
 
-		shadeMetaball<<<numblocksPathSegmentTracing, blockSize1d>>> (
+		shadeDebug<<<numblocksPathSegmentTracing, blockSize1d>>> (
 			iter,
 			num_paths,
 			dev_intersections,

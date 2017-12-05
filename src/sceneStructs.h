@@ -31,6 +31,7 @@ struct Geom {
 };
 
 struct Metaball {
+	int id;
 	int materialid;
 	float radius;
 	glm::vec3 translation;
@@ -44,7 +45,8 @@ struct BBox {
 };
 
 struct LLNode {
-	int metaballid;
+	//int metaballid;
+	Metaball metaball;
 	int next;
 };
 
@@ -54,7 +56,8 @@ struct BVHNode {
 	BBox Bbox;
 	int startM;
 	int endM;
-	int numSplitBalls;
+	int startS;
+	int endS;
 	bool isLeaf = true;
 	int id;
 	int child1id;
