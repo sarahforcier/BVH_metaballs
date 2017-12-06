@@ -17,6 +17,7 @@
 #include "scene.h"
 
 #define BVH 1
+#define MAXSPLITNODES 50
 #define NUM_BUCKETS 4
 #define THRESHOLD 0.2
 #define MAXSECANTSTEPS 30
@@ -378,7 +379,8 @@ void buildBVHNode(int depth,
 		depth++;
 		int row_idx = bvh_idx - depth_offset;
 		int leaf_offset = row_idx * max_num_split_balls;
-		for (int i = 0; i < splitBalls.size(); i++) {
+		int num_splitballs = (splitBalls.size() < MAXSPLITNODES) ? splitBalls.size() : MAXSPLITNODES;
+		for (int i = 0; i < num_splitballs; i++) {
 			leafSplitBalls[leaf_offset + i] = splitBalls[i];
 		}
 		BVHNodes[bvh_idx].startS = leaf_offset;
@@ -474,7 +476,7 @@ void buildBVHNode(int depth,
 		end, start_idx + rmetaballs_start, num_metaballs - (rmetaballs_start), max_num_split_balls, rSplitBalls, leafSplitBalls);
 }
 
-void constructBVHTree(int bvh_depth, Metaball * metaballs, std::vector<BVHNode> & BVHnodes, std::vector<Metaball> & allSplitBalls, Scene * hst_scene) {
+void constructBVHTree(int bvh_depth, Metaball * metaballs, std::vector<BVHNode> & BVHnodes, std::vector<Metaball> & allSplitBalls, int num_split_balls, Scene * hst_scene) {
 	int num_BVHnodes = (1 << (bvh_depth + 1)) - 1;
 	int num_geoms = hst_scene->metaballs.size();
 
@@ -485,7 +487,7 @@ void constructBVHTree(int bvh_depth, Metaball * metaballs, std::vector<BVHNode> 
 	BVHnodes[0].endM = num_geoms;
 
 	BBox bbox = calculateMetaballBBox(metaballs, num_geoms);
-	buildBVHNode(0, bvh_depth, 0, 0, BVHnodes, bbox , metaballs, 0, num_geoms, num_geoms, splitBalls,allSplitBalls);
+	buildBVHNode(0, bvh_depth, 0, 0, BVHnodes, bbox , metaballs, 0, num_geoms, num_split_balls, splitBalls,allSplitBalls);
 	//printf("partition test %i %i \n", num_geoms, end - metaballs);
 
 	
@@ -704,6 +706,22 @@ __global__ void computeLinkedListBVH(
 	}
 }
 
+__device__ glm::vec3 calculateBVHNormals(int count, BVHNode * bvhnode, Metaball * metaballs, Metaball *splitballs, glm::vec3 x) {
+	int startM = bvhnode->startM;
+	int endM = bvhnode->endM;
+	int startS = bvhnode->startS;
+	int endS = bvhnode->endS;
+	glm::vec3 normal(0.f);
+	for (int j = startM; j < endM; ++j) {
+		glm::vec3 diff = x - metaballs[j].translation;
+		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
+	}
+	for (int j = startS; j < endS; ++j) {
+		glm::vec3 diff = x - splitballs[j].translation;
+		normal += 2.f * diff / (glm::length2(diff) * glm::length2(diff));
+	}
+	return glm::normalize(normal);
+}
 
 __device__ float calculateBVHDensity(Metaball * metaballs, int first_node_idx, LLNode * nodeBuffer, glm::vec3 x,
 	BVHNode * BVHNode, Metaball * splitMetaballs) {
@@ -711,38 +729,38 @@ __device__ float calculateBVHDensity(Metaball * metaballs, int first_node_idx, L
 	int node_idx = first_node_idx;
 	LLNode * node;
 	Metaball * ball;
-	while (node_idx > 0) {
-		node = &nodeBuffer[node_idx];
-		//ball = &metaballs[node->metaballid];
-		if (node->bvh_id == BVHNode->id) {
-			ball = node->metaball;
-			float dist = glm::distance(x, ball->translation);
-			if (dist < ball->radius) {
-				float val = 1.0f - dist * dist / (ball->radius * ball->radius);
-				density += val * val;
-			}
-		}
-		node_idx = node->next;
-	}
+	//while (node_idx > 0) {
+	//	node = &nodeBuffer[node_idx];
+	//	//ball = &metaballs[node->metaballid];
+	//	if (node->bvh_id == BVHNode->id) {
+	//		ball = node->metaball;
+	//		float dist = glm::distance(x, ball->translation);
+	//		if (dist < ball->radius) {
+	//			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
+	//			density += val * val;
+	//		}
+	//	}
+	//	node_idx = node->next;
+	//}
 
-	//int start = BVHNode->startM;
-	//int end = BVHNode->startS;
-	//for (int i = BVHNode->startM; i <= BVHNode->endM; i++) {
-	//	ball = &metaballs[i];
-	//	float dist = glm::distance(x, ball->translation);
-	//	if (dist < ball->radius) {
-	//		float val = 1.0f - dist * dist / (ball->radius * ball->radius);
-	//		density += val * val;
-	//	}
-	//}
-	//for (int i = BVHNode->startS; i <= BVHNode->endS; i++) {
-	//	ball = &splitMetaballs[i];
-	//	float dist = glm::distance(x, ball->translation);
-	//	if (dist < ball->radius) {
-	//		float val = 1.0f - dist * dist / (ball->radius * ball->radius);
-	//		density += val * val;
-	//	}
-	//}
+	int start = BVHNode->startM;
+	int end = BVHNode->startS;
+	for (int i = BVHNode->startM; i <= BVHNode->endM; i++) {
+		ball = &metaballs[i];
+		float dist = glm::distance(x, ball->translation);
+		if (dist < ball->radius) {
+			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
+			density += val * val;
+		}
+	}
+	for (int i = BVHNode->startS; i <= BVHNode->endS; i++) {
+		ball = &splitMetaballs[i];
+		float dist = glm::distance(x, ball->translation);
+		if (dist < ball->radius) {
+			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
+			density += val * val;
+		}
+	}
 	density -= THRESHOLD;
 	return density;
 }
@@ -838,7 +856,11 @@ void computeBVHIntersections(
 		}
 
 		glm::vec3 color_test = calculateColor(num_balls, metaballs, x2);
-
+		glm::vec3 normal;
+		if (first_s != FLT_MAX) {
+			normal = calculateBVHNormals(num_balls, bvhnode, metaballs, splitMetaballs, x2);
+		}
+		
 		// TODO dichotomic method
 
 		// TODO other geom
@@ -857,7 +879,7 @@ void computeBVHIntersections(
 		//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 		intersections[path_index].materialId = 0; // TODO
 		intersections[path_index].wo = pathSegment.ray.direction;
-		intersections[path_index].surfaceNormal = calculateNormals(num_balls, metaballs, x2);
+		intersections[path_index].surfaceNormal = normal;
 		intersections[path_index].surfacePoint = x2;
 	}
 }

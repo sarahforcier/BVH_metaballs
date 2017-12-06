@@ -21,7 +21,7 @@
 #define ERRORCHECK 1
 
 
-#define MAX_BVH_DEPTH 1
+#define MAX_BVH_DEPTH 5
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
@@ -165,7 +165,7 @@ void pathtraceInit(Scene *scene)
 	
 	cudaMalloc(&dev_bvhTree, ((1 << (MAX_BVH_DEPTH + 1)) - 1) * sizeof(BVHNode)); // initialize for Split BVH
 
-	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * scene->metaballs.size() * sizeof(Metaball)); //splitmetaballs
+	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * MAXSPLITNODES * sizeof(Metaball)); //splitmetaballs
 
     checkCUDAError("pathtraceInit");
 }
@@ -245,8 +245,8 @@ void generateLinkedList(
 		glm::vec3 normal;
 		bool outside = true;
 		for (int i = 0; i < num_balls; i++) {
-			Metaball ball = metaballs[i];
-			float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
+			Metaball * ball = &metaballs[i];
+			float t = rayMarchTest(*ball, iter, pathSegment.ray, intersect_point, normal, outside);
 			if (t > 0.0f) {
 				int count = atomicAdd(LLcounter, 1); // returns before add
 				LLNode &node = nodeBuffer[count];
@@ -299,7 +299,7 @@ void computeIntersections(
 		while (node_idx >= 0) {
 			// calculate influence
 			//s = glm::dot(pathSegment.ray.direction, metaballs[nodeBuffer[node_idx].metaballid].translation - pathSegment.ray.origin);
-			s = glm::dot(pathSegment.ray.direction, nodeBuffer[node_idx].metaball.translation - pathSegment.ray.origin);
+			s = glm::dot(pathSegment.ray.direction, nodeBuffer[node_idx].metaball->translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
 
 			density = calculateDensity(metaballs, first_node_idx, nodeBuffer, x);
@@ -483,6 +483,7 @@ __global__ void shadeDebug(
 			pathSegments[idx].color = glm::dot(intersection.surfaceNormal, -camdir) * intersection.debug;
 #if SECANTSTEPDEBUG == 0
 			pathSegments[idx].color += specular * glm::vec3(0.8f, 0.8f, 0.8f);
+			//pathSegments[idx].color = glm::vec3(1.0f, 1.0f, 1.0f);
 #endif
 			//pathSegments[idx].color = camdir;
 		}
@@ -550,8 +551,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	//checkCUDAError("sort metaball distance");
 	//cudaDeviceSynchronize();
 
-#if BVH
 	startCpuTimer();
+#if BVH
+	//startCpuTimer();
 	cudaMemcpy(metaballsCPU, dev_metaballs, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToHost);
 
 	int num_bvh_nodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
@@ -559,18 +561,18 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	std::vector<BVHNode> BVHnodes;
 	BVHnodes.resize(NUM_BVH_NODES);
 	std::vector<Metaball> allSplitBalls;
-	allSplitBalls.resize(hst_scene->metaballs.size() * num_bvh_leaves);
-	constructBVHTree(MAX_BVH_DEPTH, metaballsCPU, BVHnodes, allSplitBalls, hst_scene);
+	allSplitBalls.resize(MAXSPLITNODES * num_bvh_leaves);
+	constructBVHTree(MAX_BVH_DEPTH, metaballsCPU, BVHnodes, allSplitBalls, MAXSPLITNODES , hst_scene);
 	cudaMemcpy(dev_metaballs, metaballsCPU, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyHostToDevice);
 	cudaMemcpy(dev_bvhTree, BVHnodes.data(),  num_bvh_nodes* sizeof(BVHNode), cudaMemcpyHostToDevice);
 	checkCUDAError("bvh error");
 	cudaDeviceSynchronize();
-	cudaMemcpy(dev_splitMetaballs, allSplitBalls.data(), hst_scene->metaballs.size() * num_bvh_leaves * sizeof(Metaball), cudaMemcpyHostToDevice);
+	cudaMemcpy(dev_splitMetaballs, allSplitBalls.data(), MAXSPLITNODES * num_bvh_leaves * sizeof(Metaball), cudaMemcpyHostToDevice);
 	checkCUDAError("splitmetaballs error");
 	cudaDeviceSynchronize();
-	endCpuTimer();
-	printf("memcpy\n");
-	printCPUTime();
+	//endCpuTimer();
+	//printf("memcpy\n");
+	//printCPUTime();
 #endif
 
 	// Concurrent Linked List Construction
@@ -580,10 +582,10 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 
 	bool iterationComplete = false;
-	startCpuTimer();
+	
 
 	int depth = 0;
-	while (depth < 2) {
+	while (depth < 1) {
 		cudaMemset(dev_LLcounter, 0, sizeof(int));
 		cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
 		cudaMemset(dev_nodeBuffer, -1, MAXLISTSIZE * pixelcount * sizeof(LLNode));
