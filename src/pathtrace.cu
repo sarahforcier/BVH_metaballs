@@ -21,7 +21,7 @@
 #define ERRORCHECK 1
 
 
-#define MAX_BVH_DEPTH 5
+#define MAX_BVH_DEPTH 1
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
@@ -665,7 +665,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 		//iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
 	endCpuTimer();
-	printf("the rest\n \n");
+	printf("the rest\n");
 	printCPUTime();
 
 	// what is counter? is it ever greater than size of dev_nodeBuffer

@@ -47,7 +47,9 @@ struct BBox {
 
 struct LLNode {
 	//int metaballid;
-	Metaball metaball;
+	Metaball *metaball;
+	int bvh_id;
+	bool split;
 	int next;
 };
 
