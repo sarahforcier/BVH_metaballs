@@ -21,7 +21,7 @@
 #define ERRORCHECK 1
 
 
-#define MAX_BVH_DEPTH 3
+#define MAX_BVH_DEPTH 5
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
@@ -505,6 +505,7 @@ void finalGather(int nPaths, glm::vec3 * image, PathSegment * iterationPaths)
 		image[iterationPath.pixelIndex] += iterationPath.color;
 	}
 }
+
 
 /**
  * Wrapper for the __global__ call that sets up the kernel calls and does a ton

@@ -16,7 +16,7 @@
 #include "utilities.h"
 #include "scene.h"
 
-#define BVH 1
+#define BVH 0
 #define NUM_BUCKETS 4
 #define THRESHOLD 0.2
 #define MAXSECANTSTEPS 30
@@ -352,12 +352,6 @@ BBox calculateMetaballBBox(Metaball* metaballs, int num_metaballs) {
 	return bbox;
 }
 
-void tagMetaballsBVHID(Metaball * metaballs, int bvh_id, int start, int finish) {
-	for (int i = start; i <= finish; i++) {
-		metaballs[i].bvh_id = bvh_id;
-	}
-}
-
 void buildBVHNode(int depth, 
 				int max_depth, 
 				int axis,
@@ -389,7 +383,6 @@ void buildBVHNode(int depth,
 		}
 		BVHNodes[bvh_idx].startS = leaf_offset;
 		BVHNodes[bvh_idx].endS = leaf_offset + splitBalls.size() - 1;
-		tagMetaballsBVHID(metaballs, bvh_idx, BVHNodes[bvh_idx].startM, BVHNodes[bvh_idx].endM);
 		return;
 	}
 
@@ -582,8 +575,8 @@ __global__ void computeLinkedListBVH(
 
 	if (path_index < num_paths)
 	{
-		glm::vec2 geom_ranges[300];
-		glm::vec2 split_ranges[300];
+		glm::vec3 geom_ranges[300];
+		glm::vec3 split_ranges[300];
 		int geom_idx = 0;
 		int split_idx = 0;
 		PathSegment pathSegment = pathSegments[path_index];
@@ -619,13 +612,13 @@ __global__ void computeLinkedListBVH(
 			}
 
 			if (t1 > 0.0f && child1->isLeaf) {
-				geom_ranges[geom_idx++] = glm::vec2(child1->startM, child1->endM);
-				split_ranges[split_idx++] = glm::vec2(child1->startS, child1->endS);
+				geom_ranges[geom_idx++] = glm::vec3(child1->startM, child1->endM, child1->id);
+				split_ranges[split_idx++] = glm::vec3(child1->startS, child1->endS, child1->id);
 				//queue up geoms for intersection test
 			}
 			if (t2 > 0.0f && child2->isLeaf) {
-				geom_ranges[geom_idx++] = glm::vec2(child2->startM, child2->endM);
-				split_ranges[split_idx++] = glm::vec2(child2->startS, child2->endS);
+				geom_ranges[geom_idx++] = glm::vec3(child2->startM, child2->endM, child2->id);
+				split_ranges[split_idx++] = glm::vec3(child2->startS, child2->endS, child2->id);
 				//queue up geoms for intersection test
 			}
 
@@ -664,6 +657,9 @@ __global__ void computeLinkedListBVH(
 
 			for (int m = start; m <= end; m++) {
 				Metaball ball = metaballs[m];
+				ball.id = m;
+				ball.split = 0;
+				ball.bvh_id = geom_ranges[i][2];
 				float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
 
 				if (t > 0.0f) {
@@ -683,6 +679,9 @@ __global__ void computeLinkedListBVH(
 
 			for (int m = start; m <= end; m++) {
 				Metaball ball = splitmetaballs[m];
+				ball.id = m;
+				ball.split = 1;
+				ball.bvh_id = split_ranges[i][2];
 				float t = rayMarchTest(ball, iter, pathSegment.ray, intersect_point, normal, outside);
 
 				if (t > 0.0f) {
@@ -707,34 +706,36 @@ __device__ float calculateBVHDensity(Metaball * metaballs, int first_node_idx, L
 	int node_idx = first_node_idx;
 	LLNode * node;
 	Metaball * ball;
-	while (node_idx > 0) {
-		node = &nodeBuffer[node_idx];
-		//ball = &metaballs[node->metaballid];
-		ball = &(node->metaball);
+	//while (node_idx > 0) {
+	//	node = &nodeBuffer[node_idx];
+	//	//ball = &metaballs[node->metaballid];
+	//	ball = &(node->metaball);
+	//	float dist = glm::distance(x, ball->translation);
+	//	if (dist < ball->radius) {
+	//		float val = 1.0f - dist * dist / (ball->radius * ball->radius);
+	//		density += val * val;
+	//	}
+	//	node_idx = node->next;
+	//}
+
+	int start = BVHNode->startM;
+	int end = BVHNode->startS;
+	for (int i = BVHNode->startM; i <= BVHNode->endM; i++) {
+		ball = &metaballs[i];
 		float dist = glm::distance(x, ball->translation);
 		if (dist < ball->radius) {
 			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
 			density += val * val;
 		}
-		node_idx = node->next;
 	}
-
-	//for (int i = BVHNode->startM; i < BVHNode->endM; i++) {
-	//	ball = &metaballs[i];
-	//	float dist = glm::distance(x, ball->translation);
-	//	if (dist < ball->radius) {
-	//		float val = 1.0f - dist * dist / (ball->radius * ball->radius);
-	//		density += val * val;
-	//	}
-	//}
-	//for (int i = BVHNode->startS; i < BVHNode->endS; i++) {
-	//	ball = &splitMetaballs[i];
-	//	float dist = glm::distance(x, ball->translation);
-	//	if (dist < ball->radius) {
-	//		float val = 1.0f - dist * dist / (ball->radius * ball->radius);
-	//		density += val * val;
-	//	}
-	//}
+	for (int i = BVHNode->startS; i <= BVHNode->endS; i++) {
+		ball = &splitMetaballs[i];
+		float dist = glm::distance(x, ball->translation);
+		if (dist < ball->radius) {
+			float val = 1.0f - dist * dist / (ball->radius * ball->radius);
+			density += val * val;
+		}
+	}
 	density -= THRESHOLD;
 	return density;
 }
@@ -781,6 +782,7 @@ void computeBVHIntersections(
 			// calculate influence
 			//s = glm::dot(pathSegment.ray.direction, metaballs[nodeBuffer[node_idx].metaballid].translation - pathSegment.ray.origin);
 			int bvh_id = nodeBuffer[node_idx].metaball.bvh_id;
+			//printf("metaball id, %i, split %i, bvh id, %i\n", nodeBuffer[node_idx].metaball.id, nodeBuffer[node_idx].metaball.split, bvh_id);
 			BVHNode * tempbvhnode = &BVHNodes[bvh_id];
 			s = glm::dot(pathSegment.ray.direction, nodeBuffer[node_idx].metaball.translation - pathSegment.ray.origin);
 			x = pathSegment.ray.origin + s * pathSegment.ray.direction;
@@ -801,7 +803,10 @@ void computeBVHIntersections(
 		float t1 = first_s;
 
 		float f1 = first_density;
-		float f0 = calculateBVHDensity(metaballs, first_node_idx, nodeBuffer, pathSegment.ray.origin, bvhnode, splitMetaballs);
+		float f0;
+		if (first_s != FLT_MAX) {
+			f0 =  calculateBVHDensity(metaballs, first_node_idx, nodeBuffer, pathSegment.ray.origin, bvhnode, splitMetaballs);
+		}
 		float t2 = 0;
 		float f2 = 0;
 		int steps = 0;

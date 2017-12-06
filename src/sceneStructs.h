@@ -37,6 +37,7 @@ struct Metaball {
 	glm::vec3 translation;
 	glm::vec3 velocity;
 	int bvh_id;
+	int split;
 };
 
 struct BBox {
