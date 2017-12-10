@@ -15,8 +15,8 @@ FOVY        45
 ITERATIONS  5000
 DEPTH       8
 FILE        cornell
-EYE         0.0 0 25
-LOOKAT      0 0 0
+EYE         0.0 10 25
+LOOKAT      0 20 0
 UP          0 1 0
 
 METABALLS
