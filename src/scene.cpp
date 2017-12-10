@@ -4,8 +4,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 26
-#define SPAWNBOUNDS 18
+#define NUM_METABALLS_SQRT 15
+#define SPAWNBOUNDS 14
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;

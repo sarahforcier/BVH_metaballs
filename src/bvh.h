@@ -16,8 +16,8 @@
 #include "utilities.h"
 #include "scene.h"
 
-#define BVH 0
-#define MAX_BVH_DEPTH 13
+#define BVH 1
+#define MAX_BVH_DEPTH 12
 #define MAXSPLITNODES 150
 #define NUM_BUCKETS 4
 #define THRESHOLD 0.2
