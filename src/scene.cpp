@@ -4,7 +4,8 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 7
+#define NUM_METABALLS_SQRT 26
+#define SPAWNBOUNDS 18
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;
@@ -100,7 +101,8 @@ int Scene::loadGeom(string objectid) {
 int Scene::loadMetaballs(int num) 
 {
 	cout << "Loading " << (num*num*num) << " Metaballs ..." << endl;
-	float step = 10.f / num;
+
+	float step = (float)SPAWNBOUNDS / (float)num;
 	int half_num = num / 2;
 	for (int i = -half_num; i < half_num; ++i) {
 		for (int j = -half_num; j < half_num; ++j) {

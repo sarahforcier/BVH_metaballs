@@ -16,12 +16,14 @@
 #include "utilities.h"
 #include "scene.h"
 
-#define BVH 1
-#define MAX_BVH_DEPTH 4
-#define MAXSPLITNODES 50
+#define BVH 0
+#define MAX_BVH_DEPTH 13
+#define MAXSPLITNODES 150
 #define NUM_BUCKETS 4
 #define THRESHOLD 0.2
 #define MAXSECANTSTEPS 100
+#define MAXBVHSTACK 50
+#define MAXBVHINTERSECTS 100
 
 __device__ glm::vec3 indexToColor(int i, int max) {
 	int comp_range = max / 3;
@@ -374,15 +376,18 @@ void buildBVHNode(int depth,
 	//printf("bvh idx %i, num balls %i \n", bvh_idx, num_metaballs);
 
 	if (depth == max_depth || num_metaballs <= 1) {
+		if (depth != max_depth) {
+			int breakpoint;
+		}
 		BVHNodes[bvh_idx].isLeaf = true;
 		//TAKE CARE OF THROWING SPLIT NODES
 		int depth_offset = (1 << (depth)) - 1;
-		depth++;
+		//depth++;
 		int row_idx = bvh_idx - depth_offset;
-		//int max_depth_diff = max_depth - depth;
-		//int idx_mult = 1 << max_depth_diff;
-		//int leaf_offset = row_idx * idx_mult * max_num_split_balls;
-		int leaf_offset = row_idx * max_num_split_balls;
+		int max_depth_diff = max_depth - depth;
+		int idx_mult = 1 << max_depth_diff;
+		int leaf_offset = row_idx * idx_mult * max_num_split_balls;
+		//leaf_offset = row_idx * max_num_split_balls;
 		int num_splitballs = (splitBalls.size() < MAXSPLITNODES) ? splitBalls.size() : MAXSPLITNODES;
 		for (int i = 0; i < num_splitballs; i++) {
 			leafSplitBalls[leaf_offset + i] = splitBalls[i];
@@ -405,12 +410,12 @@ void buildBVHNode(int depth,
 		BVHNodes[bvh_idx].isLeaf = true;
 		//TAKE CARE OF THROWING SPLIT NODES
 		int depth_offset = (1 << (depth)) - 1;
-		depth++;
+		//depth++;
 		int row_idx = bvh_idx - depth_offset;
-		//int max_depth_diff = max_depth - depth;
-		//int idx_mult = 1 << max_depth_diff;
-		//int leaf_offset = row_idx * idx_mult * max_num_split_balls;
-		int leaf_offset = row_idx * max_num_split_balls;
+		int max_depth_diff = max_depth - depth;
+		int idx_mult = 1 << max_depth_diff;
+		int leaf_offset = row_idx * idx_mult * max_num_split_balls;
+		//leaf_offset = row_idx * max_num_split_balls;
 		int num_splitballs = (splitBalls.size() < MAXSPLITNODES) ? splitBalls.size() : MAXSPLITNODES;
 		for (int i = 0; i < num_splitballs; i++) {
 			leafSplitBalls[leaf_offset + i] = splitBalls[i];
@@ -603,11 +608,11 @@ __global__ void computeLinkedListBVH(
 
 	if (path_index < num_paths)
 	{
-		glm::vec3 geom_ranges[300];
-		glm::vec3 split_ranges[300];
+		glm::vec3 geom_ranges[MAXBVHINTERSECTS];
+		glm::vec3 split_ranges[MAXBVHINTERSECTS];
 		int geom_idx = 0;
 		PathSegment pathSegment = pathSegments[path_index];
-		BVHNode* stack[300];
+		BVHNode* stack[MAXBVHSTACK];
 		BVHNode* * stackPtr = stack;
 		*stackPtr++ = NULL; // push
 
@@ -721,7 +726,6 @@ __global__ void computeLinkedListBVH(
 					node.next = headPtrBuffer[path_index];
 					headPtrBuffer[path_index] = count;
 				}
-
 			}
 		}
 

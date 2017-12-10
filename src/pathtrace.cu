@@ -20,12 +20,13 @@
 
 #define ERRORCHECK 1
 
-
+#define NORMALSDEBUG 1
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
-#define MAXLISTSIZE 100
+#define MAXLISTSIZE 300
+#define SCENEBOUND 12
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
 #define checkCUDAError(msg) checkCUDAErrorFn(msg, FILENAME, __LINE__)
@@ -336,7 +337,8 @@ void computeIntersections(
 			steps++;
 		}
 
-		glm::vec3 color_test = calculateColor(num_balls, metaballs, x2);
+		glm::vec3 normal = calculateNormals(num_balls, metaballs, x2);
+		glm::vec3 color_test = normal;
 
 		// TODO dichotomic method
 
@@ -356,7 +358,7 @@ void computeIntersections(
 		//intersections[path_index].materialId = geoms[hit_geom_index].materialid;
 		intersections[path_index].materialId = 0; // TODO
 		intersections[path_index].wo = pathSegment.ray.direction;
-		intersections[path_index].surfaceNormal = calculateNormals(num_balls, metaballs, x2);
+		intersections[path_index].surfaceNormal = normal;
 		intersections[path_index].surfacePoint = x2;
 	}
 }
@@ -369,30 +371,31 @@ void translateMetaballs(int num_balls, Metaball * metaballs)
 
 	if (ball_index < num_balls)
 	{
+		float b = SCENEBOUND;
 		metaballs[ball_index].translation += metaballs[ball_index].velocity / 10.f;
-		if (metaballs[ball_index].translation.y > 5.f) {
+		if (metaballs[ball_index].translation.y > b) {
 			metaballs[ball_index].velocity.y *= -1.f;
-			metaballs[ball_index].translation.y = 5.f;
+			metaballs[ball_index].translation.y = b;
 		}
-		if (metaballs[ball_index].translation.y < -5.f) {
+		if (metaballs[ball_index].translation.y < -b) {
 			metaballs[ball_index].velocity.y *= -1.f;
-			metaballs[ball_index].translation.y = -5.f;
+			metaballs[ball_index].translation.y = -b;
 		}
-		if (metaballs[ball_index].translation.z > 5.f) {
+		if (metaballs[ball_index].translation.z > b) {
 			metaballs[ball_index].velocity.z *= -1.f;
-			metaballs[ball_index].translation.z = 5.f;
+			metaballs[ball_index].translation.z = b;
 		}
-		if (metaballs[ball_index].translation.z < -5.f) {
+		if (metaballs[ball_index].translation.z < -b) {
 			metaballs[ball_index].velocity.z *= -1.f;
-			metaballs[ball_index].translation.z = -5.f;
+			metaballs[ball_index].translation.z = -b;
 		}
-		if (metaballs[ball_index].translation.x > 5.f) {
+		if (metaballs[ball_index].translation.x > b) {
 			metaballs[ball_index].velocity.x *= -1.f;
-			metaballs[ball_index].translation.x = 5.f;
+			metaballs[ball_index].translation.x = b;
 		}
-		if (metaballs[ball_index].translation.x < -5.f) {
+		if (metaballs[ball_index].translation.x < -b) {
 			metaballs[ball_index].velocity.x *= -1.f;
-			metaballs[ball_index].translation.x = -5.f;
+			metaballs[ball_index].translation.x = -b;
 		}
 
 	}
@@ -584,7 +587,12 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	
 
 	int depth = 0;
-	while (depth < 1) {
+#if NORMALSDEBUG
+	int max_depth = 1;
+#else
+	int max_depth = 3;
+#endif
+	while (depth < max_depth) {
 		cudaMemset(dev_LLcounter, 0, sizeof(int));
 		cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
 		cudaMemset(dev_nodeBuffer, -1, MAXLISTSIZE * pixelcount * sizeof(LLNode));
@@ -653,6 +661,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 #endif
 
+#if NORMALSDEBUG
 		shadeDebug<<<numblocksPathSegmentTracing, blockSize1d>>> (
 			iter,
 			num_paths,
@@ -663,6 +672,18 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 			dev_environment
 			);
 		checkCUDAError("shading");
+#else
+		shadeMetaball << <numblocksPathSegmentTracing, blockSize1d >> > (
+			iter,
+			num_paths,
+			dev_intersections,
+			dev_paths,
+			dev_indices,
+			dev_materials,
+			dev_environment
+			);
+		checkCUDAError("shading");
+#endif
 		//iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
 	endCpuTimer();
