@@ -21,7 +21,6 @@
 #define ERRORCHECK 1
 
 
-#define MAX_BVH_DEPTH 5
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0

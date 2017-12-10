@@ -49,7 +49,6 @@ struct LLNode {
 	//int metaballid;
 	Metaball *metaball;
 	int bvh_id;
-	bool split;
 	int next;
 };
 
@@ -68,6 +67,7 @@ struct BVHNode {
 	glm::mat4 transform;
 	glm::mat4 inverseTransform;
 	glm::mat4 invTranspose;
+	glm::vec3 id_col;
 };
 
 struct Material {
