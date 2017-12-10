@@ -5,6 +5,7 @@
 #include <glm/gtx/string_cast.hpp>
 
 #define NUM_METABALLS_SQRT 100
+#define SPAWNBOUNDS 14
 
 Scene::Scene(string filename) {
     cout << "Reading scene from " << filename << " ..." << endl;

@@ -175,6 +175,7 @@ void pathtraceInit(Scene *scene)
 	cudaMalloc(&dev_splitMetaballs, (1 << MAX_BVH_DEPTH) * MAXSPLITNODES * sizeof(Metaball)); //splitmetaballs
 
 	cudaMemcpy(metaballsCPU, dev_metaballs_translated, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToHost);
+#if BVH
 	int num_bvh_nodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
 	int num_bvh_leaves = (1 << MAX_BVH_DEPTH);
 	BVHnodes.clear();
@@ -189,6 +190,7 @@ void pathtraceInit(Scene *scene)
 	cudaMemcpy(dev_splitMetaballs, allSplitBalls.data(), MAXSPLITNODES * num_bvh_leaves * sizeof(Metaball), cudaMemcpyHostToDevice);
 	checkCUDAError("splitmetaballs error");
 	cudaDeviceSynchronize();
+#endif
 
     checkCUDAError("pathtraceInit");
 }
@@ -603,7 +605,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	int num_bvh_nodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;
 	int num_bvh_leaves = (1 << MAX_BVH_DEPTH);
 #else
-	cudaMemcpy(dev_metaballs, dev_metaballs_translated, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToDevice;
+	cudaMemcpy(dev_metaballs, dev_metaballs_translated, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToDevice);
 #endif
 
 	// Concurrent Linked List Construction
@@ -621,6 +623,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 #else
 	int max_depth = 3;
 #endif
+	startCpuTimer();
 	while (depth < max_depth) {
 		cudaMemset(dev_LLcounter, 0, sizeof(int));
 		cudaMemset(dev_headPtrBuffer, -1, pixelcount * sizeof(int));
@@ -675,7 +678,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 
 		checkCUDAError("compute Linked List with BVH");
 		cudaDeviceSynchronize();
-		startCpuTimer();
+		
 		computeBVHIntersections << <numblocksPathSegmentTracing, blockSize1d >> > (
 			depth,
 			dev_paths, num_paths,
@@ -696,9 +699,6 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 			//cudaDeviceSynchronize();
 			build_bvh = false;
 		}
-		endCpuTimer();
-		printf("intersection time");
-		printCPUTime();
 		
 		//checkCUDAError("compute Intersection with BVH");
 		//cudaDeviceSynchronize();
@@ -731,7 +731,9 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 #endif
 		//iterationComplete = true; // TODO: should be based off stream compaction results.
 	}
-
+	endCpuTimer();
+	printf("intersection time");
+	printCPUTime();
 	// what is counter? is it ever greater than size of dev_nodeBuffer
 	int count;
 	cudaMemcpy(&count, dev_LLcounter, sizeof(int), cudaMemcpyDeviceToHost);
