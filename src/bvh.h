@@ -16,14 +16,14 @@
 #include "utilities.h"
 #include "scene.h"
 
-#define BVH 0
+#define BVH 1
 #define MAX_BVH_DEPTH 12
 #define MAXSPLITNODES 100
 #define NUM_BUCKETS 4
 #define THRESHOLD 0.2
 #define MAXSECANTSTEPS 100
-#define MAXBVHSTACK 30
-#define MAXBVHINTERSECTS 50
+#define MAXBVHSTACK 50
+#define MAXBVHINTERSECTS 70
 
 __device__ glm::vec3 indexToColor(int i, int max) {
 	int comp_range = max / 3;

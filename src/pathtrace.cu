@@ -20,12 +20,12 @@
 
 #define ERRORCHECK 1
 
-#define NORMALSDEBUG 1
+#define NORMALSDEBUG 0
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
-#define MAXLISTSIZE 300
+#define MAXLISTSIZE 150
 #define SCENEBOUND 8
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)

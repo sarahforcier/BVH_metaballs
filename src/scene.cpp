@@ -4,7 +4,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 100
+#define NUM_METABALLS_SQRT 90
 #define SPAWNBOUNDS 14
 
 Scene::Scene(string filename) {
@@ -143,8 +143,8 @@ int Scene::loadTornadoMetaballs(int num)
 			float y = height_step * (float((float)num * pow((float)h / num, -0.18708664335 / -0.30102999566)) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX));
 			float radius = (float)SPAWNBOUNDS * pow(y / SPAWNBOUNDS, -0.39794000867 / -0.30102999566);
 			ball.translation = glm::vec3(radius * cos(x), y, radius * sin(x));
-			ball.velocity = glm::vec3(0, 0.1f * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.02f, 0);
-			ball.radius = (0.5f * y / SPAWNBOUNDS) * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.25f;
+			ball.velocity = glm::vec3(0, 0.04f * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.005f, 0);
+			ball.radius = (0.2f * y / SPAWNBOUNDS) * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.2f;
 			ball.materialid = 0;
 			metaballs.push_back(ball);
 		}
