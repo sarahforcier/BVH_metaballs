@@ -112,7 +112,7 @@ Path tracing and ray-isosurface intersection (visualization of metaballs)
 ![](img/internal.png)
 
 ## Milestone December 11, 2017
-TODO: add ambient occlusion and design snazzy scenes
+[Presentation](https://docs.google.com/presentation/d/1VnP5PpfE1NoT5oBOMwDdIdm3YqI9jJFYead3t_LEBN4/edit?usp=sharing)
 
 ## References
 1. O. Gourmel, A. Pajot, M. Paulin, L. Barthe, P. Poulin. [Fitted BVH for Fast Raytracing of Metaballs](http://www.ligum.umontreal.ca/Gourmel-2010-FBVH/Gourmel-2010-FBVH.pdf). EUROGRAPHICS, 2009
