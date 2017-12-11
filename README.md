@@ -7,6 +7,8 @@ Authors:
 ## Overview
 Metaballs are a fun way to create interesting geometries or simulate deformation or fluids. However, their isosurface representation is difficult to calculate in real time. One such method uses the marching cube algorithm to tessellate the surface, but this scales poorly for an increasing number of metaballs or for high resolution because it requires voxelization of the space. We aim to achieve speedup by keeping the metaballs in implicit form and using a modified bounding volume hierarchy as described by Gourmel et al. (Siggraph 2009). Along with a BVH structure, this method describes a fast approach to finding a ray-isosurface intersection that avoids slow ray marching. The BVH is computed on the CPU, but the rendering will be performed with CUDA on the GPU with BVH nodes and metaball information stored as textures. Once we render metaballs in real time, we want to demonstrate the benefits of this method by implementing fresnel reflection and refraction and ambient occlusion. 
 
+![](img/interstellar.gif)
+
 ## Features
 * Secant Method for ray-isosurface intersection
 * Fitted BVH with Split Nodes
@@ -52,6 +54,12 @@ The leaf node in red will be indexed to a corresponding node at max depth for st
 Our BVH tree construction takes place on the CPU, because using dynamic arrays to pass down split metaballs data to child nodes is more convenient. Though a CPU construction algorithm may be slower than a GPU construction algorithm, we can take advantage of CPU and GPU overlap to hide the cost of our construction process. By executing the BVH construction command immediately after our intersection test kernel (our most expensive kernel) and synchronizing afterwards, the CPU and GPU commands run in parallel, reducing the overall computation time per frame.
 
 ## Performance Analysis
+
+![](img/numballs.png)
+
+![](img/depth.png)
+
+![](img/splitnodes.png)
 
 ## Milestone November 20, 2017
 Path tracing and ray-isosurface intersection (visualization of metaballs)
