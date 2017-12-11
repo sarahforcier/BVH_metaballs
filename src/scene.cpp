@@ -4,7 +4,7 @@
 #include <glm/gtc/matrix_inverse.hpp>
 #include <glm/gtx/string_cast.hpp>
 
-#define NUM_METABALLS_SQRT 20
+#define NUM_METABALLS_SQRT 90
 #define SPAWNBOUNDS 14
 
 Scene::Scene(string filename) {
@@ -22,7 +22,12 @@ Scene::Scene(string filename) {
         if (!line.empty()) {
             vector<string> tokens = utilityCore::tokenizeString(line);
             if (strcmp(tokens[0].c_str(), "METABALLS") == 0) {
-                loadMetaballs(NUM_METABALLS_SQRT);
+#if TORNADO
+				loadTornadoMetaballs(NUM_METABALLS_SQRT);
+#else
+				loadMetaballs(NUM_METABALLS_SQRT);
+#endif
+                
                 cout << " " << endl;
             } else if (strcmp(tokens[0].c_str(), "ENVIRONMENT") == 0) {
                 loadEnvironment();
@@ -121,6 +126,30 @@ int Scene::loadMetaballs(int num)
 		}
 	}
 return 1;
+}
+
+int Scene::loadTornadoMetaballs(int num)
+{
+	cout << "Loading " << (num*num) << " Metaballs ..." << endl;
+
+	float angle_step = 2.f * PI / (float)num;;
+	float height_step = (float)SPAWNBOUNDS / (float)num;
+
+	for (int angle = 0; angle < num ; ++angle) {
+		for (int h = 0; h < num; ++h) {
+			Metaball ball;
+
+			float x = angle_step * (float(angle) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX));
+			float y = height_step * (float((float)num * pow((float)h / num, -0.18708664335 / -0.30102999566)) + static_cast <float> (rand()) / static_cast <float> (RAND_MAX));
+			float radius = (float)SPAWNBOUNDS * pow(y / SPAWNBOUNDS, -0.39794000867 / -0.30102999566);
+			ball.translation = glm::vec3(radius * cos(x), y, radius * sin(x));
+			ball.velocity = glm::vec3(0, 0.04f * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.005f, 0);
+			ball.radius = (0.2f * y / SPAWNBOUNDS) * static_cast <float> (rand()) / static_cast <float> (RAND_MAX) + 0.2f;
+			ball.materialid = 0;
+			metaballs.push_back(ball);
+		}
+	}
+	return 1;
 }
 
 int Scene::loadCamera() {

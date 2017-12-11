@@ -20,12 +20,12 @@
 
 #define ERRORCHECK 1
 
-#define NORMALSDEBUG 1
+#define NORMALSDEBUG 0
 #define NUM_BVH_NODES (1 << (MAX_BVH_DEPTH + 1)) - 1
 #define NUM_BVH_LEAVES (1 << MAX_BVH_DEPTH)
 #define SECANTSTEPDEBUG 0
 #define MAXDICHOTOMICSTEPS 30
-#define MAXLISTSIZE 300
+#define MAXLISTSIZE 150
 #define SCENEBOUND 8
 
 #define FILENAME (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
@@ -428,6 +428,27 @@ void translateMetaballs(int num_balls, Metaball * metaballs, Metaball * metaball
 	}
 }
 
+__global__
+void translateTornadoMetaballs(int num_balls, Metaball * metaballs, Metaball * metaballs_translated)
+{
+	int ball_index = blockIdx.x * blockDim.x + threadIdx.x;
+
+	if (ball_index < num_balls)
+	{
+		metaballs_translated[ball_index] = metaballs[ball_index];
+		glm::vec3 xz = glm::vec3(metaballs_translated[ball_index].translation.x, 0.f, metaballs_translated[ball_index].translation.z);
+		float radius = glm::length(xz);
+		glm::vec3 vel = glm::cross(xz, metaballs_translated[ball_index].velocity);
+		vel += metaballs_translated[ball_index].translation;
+		metaballs_translated[ball_index].translation.y = vel.y;
+		vel.y = 0.f;
+		vel = radius * glm::normalize(vel);
+		metaballs_translated[ball_index].translation.x = vel.x;
+		metaballs_translated[ball_index].translation.z = vel.z;
+
+	}
+}
+
 __global__ 
 void computeBallDist(int num_balls, glm::vec3 cam_pos, Metaball * metaballs, float * ballDist)
 {
@@ -716,7 +737,7 @@ void pathtrace(uchar4 *pbo, int frame, int iter)
 	// what is counter? is it ever greater than size of dev_nodeBuffer
 	int count;
 	cudaMemcpy(&count, dev_LLcounter, sizeof(int), cudaMemcpyDeviceToHost);
-	printf("LLcount: %i\n", count);
+	//printf("LLcount: %i\n", count);
 
 	// Assemble this iteration and apply it to the image
 	dim3 numBlocksPixels = (pixelcount + blockSize1d - 1) / blockSize1d;
@@ -740,7 +761,13 @@ void pathtraceReset()
 	// move metaballs
 	const int blockSize1d = 128;
 	dim3 numblocksMetaballs = (hst_scene->metaballs.size() + blockSize1d - 1) / blockSize1d;
+
+#if TORNADO
+	translateTornadoMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs, dev_metaballs_translated);
+#else
 	translateMetaballs << <numblocksMetaballs, blockSize1d >> > (hst_scene->metaballs.size(), dev_metaballs, dev_metaballs_translated);
+#endif
+
 	checkCUDAError("translate metaballs");
 	cudaMemcpy(metaballsCPU, dev_metaballs_translated, hst_scene->metaballs.size() * sizeof(Metaball), cudaMemcpyDeviceToHost);
 	int num_bvh_nodes = (1 << (MAX_BVH_DEPTH + 1)) - 1;

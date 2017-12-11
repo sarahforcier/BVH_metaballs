@@ -8,6 +8,9 @@
 #include "utilities.h"
 #include "sceneStructs.h"
 
+#define TORNADO 1
+#define SPAWNBOUNDS 25
+
 using namespace std;
 
 class Scene {
@@ -17,6 +20,7 @@ private:
     int loadEnvironment();
     int loadGeom(string objectid);
 	int loadMetaballs(int num);
+	int loadTornadoMetaballs(int num);
     int loadCamera();
 public:
     Scene(string filename);
