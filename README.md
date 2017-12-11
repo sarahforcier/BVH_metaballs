@@ -57,9 +57,41 @@ Our BVH tree construction takes place on the CPU, because using dynamic arrays t
 
 ![](img/numballs.png)
 
+Our BVH acceleration structure achieves speed up depending on the scene. As the number of metaballs increases, the speed up is about 2 times faster.
+
 ![](img/depth.png)
 
+As the maximum depth increases, the tree traversal narrows the number of metaballs needed to determine intersection, thus speeding up the simulation. However, with a larger depth, more memory is required to store the BVH on the GPU. 
+
 ![](img/splitnodes.png)
+
+Similarly to the slow down associated with a large max BVH depth, allocating a lot of memory for the split nodes also slows down the simulation.
+
+## Install and Build Instructions
+
+1. In Git Bash, navigate to your cloned project directory.
+2. Create a `build` directory: `mkdir build`
+   * (This "out-of-source" build makes it easy to delete the `build` directory
+     and try again if something goes wrong with the configuration.)
+3. Navigate into that directory: `cd build`
+4. Open the CMake GUI to configure the project:
+   * `cmake-gui ..` or `"C:\Program Files (x86)\cmake\bin\cmake-gui.exe" ..`
+   * Click *Configure*.  Select your version of Visual Studio, Win64.
+     (**NOTE:** you must use Win64, as we don't provide libraries for Win32.)
+   * If you see an error like `CUDA_SDK_ROOT_DIR-NOTFOUND`,
+     set `CUDA_SDK_ROOT_DIR` to your CUDA install path. This will be something
+     like: `C:/Program Files/NVIDIA GPU Computing Toolkit/CUDA/v7.5`
+   * Click *Generate*.
+5. If generation was successful, there should now be a Visual Studio solution
+   (`.sln`) file in the `build` directory that you just created. Open this.
+   (from the command line: `explorer *.sln`)
+6. Build. (Note that there are Debug and Release configuration options.)
+7. Run. Make sure you run the `metaball_path_tracer` target (not `ALL_BUILD`) by
+   right-clicking it and selecting "Set as StartUp Project".
+   * If you have switchable graphics (NVIDIA Optimus), you may need to force
+     your program to run with only the NVIDIA card. In NVIDIA Control Panel,
+     under "Manage 3D Settings," set "Multi-display/Mixed GPU acceleration"
+     to "Single display performance mode".
 
 ## Milestone November 20, 2017
 Path tracing and ray-isosurface intersection (visualization of metaballs)
